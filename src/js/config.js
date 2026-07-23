@@ -72,7 +72,7 @@ module.exports = [
       },
       {
         "type": "text",
-        "defaultValue": "Choose what appears in each corner. Use a light color on black dials."
+        "defaultValue": "Corner complications for rectangular watches only (not shown on Pebble Time Round / Round 2). Use a light color on black dials."
       },
       {
         "type": "select",

@@ -190,7 +190,9 @@ static GPath *s_minute_arrow_emery, *s_hour_arrow_emery;
 static GPath *s_minute_arrow_gabbro, *s_hour_arrow_gabbro;
 
 static GFont s_res_gothic_18_bold;
+#if !defined(PBL_ROUND)
 static GFont s_comp_font;
+#endif
 static TextLayer *s_textlayer_date;
 
 static Window *bluetooth_connected_splash_window;
@@ -244,6 +246,7 @@ static void parse_hex_color(const char *hex, uint8_t *r, uint8_t *g, uint8_t *b)
 }
 
 // Convert hex color string to GColor (B&W falls back by brightness)
+#if !defined(PBL_ROUND)
 static GColor color_from_hex_str(const char *hex) {
   uint8_t r, g, b;
   parse_hex_color(hex, &r, &g, &b);
@@ -306,6 +309,7 @@ static int get_heart_rate(void) {
   #endif
   return -1;
 }
+#endif // !PBL_ROUND
 
 static void request_weather(void) {
   DictionaryIterator *iter;
@@ -442,6 +446,7 @@ static void apply_second_hand_mode(void) {
   }
 }
 
+#if !defined(PBL_ROUND)
 static void draw_weather_icon(GContext *ctx, GPoint center, int code, GColor color) {
   graphics_context_set_stroke_color(ctx, color);
   graphics_context_set_fill_color(ctx, color);
@@ -539,22 +544,12 @@ static bool complication_text(Corner corner, char *buf, size_t n) {
 static GRect complication_rect(Corner corner, GRect bounds) {
   const int16_t box_w = 56;
   const int16_t box_h = 28;
-  #if defined(PBL_ROUND)
-    #if PBL_DISPLAY_WIDTH >= 260
-      const int16_t pad_x = 28;
-      const int16_t pad_y = 28;
-    #else
-      const int16_t pad_x = 18;
-      const int16_t pad_y = 18;
-    #endif
+  #if PBL_DISPLAY_WIDTH >= 200
+    const int16_t pad_x = 6;
+    const int16_t pad_y = 4;
   #else
-    #if PBL_DISPLAY_WIDTH >= 200
-      const int16_t pad_x = 6;
-      const int16_t pad_y = 4;
-    #else
-      const int16_t pad_x = 2;
-      const int16_t pad_y = 0;
-    #endif
+    const int16_t pad_x = 2;
+    const int16_t pad_y = 0;
   #endif
 
   switch (corner) {
@@ -600,6 +595,7 @@ static void complications_update_proc(Layer *layer, GContext *ctx) {
     graphics_draw_text(ctx, buf, s_comp_font, rect, GTextOverflowModeTrailingEllipsis, align, NULL);
   }
 }
+#endif // !PBL_ROUND
 
 // Default settings
 static void prv_default_settings() {
@@ -1347,7 +1343,9 @@ static void window_load(Window *window) {
   strftime(date, sizeof(date), "%d", t);
 
   s_res_gothic_18_bold = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  #if !defined(PBL_ROUND)
   s_comp_font = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
+  #endif
 
   // Position date layer - adjust for round watchface mode
   if (strcmp(settings.dialcolor, "round") == 0) {
@@ -1382,10 +1380,12 @@ static void window_load(Window *window) {
     layer_set_hidden((Layer *)s_textlayer_date, true);
   }
 
-  // Corner complications (below hands so hands draw on top)
+  // Corner complications — rectangular watches only (corners clip on chalk/gabbro)
+  #if !defined(PBL_ROUND)
   s_complications_layer = layer_create(bounds);
   layer_set_update_proc(s_complications_layer, complications_update_proc);
   layer_add_child(window_layer, s_complications_layer);
+  #endif
 
   // Initialize hands layer
   s_hands_layer = layer_create(bounds);
