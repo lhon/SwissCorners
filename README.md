@@ -1,14 +1,25 @@
-# ModernSwiss - Swiss Railways Watch Face for Pebble
+# SwissCorners - Swiss Railways Watch Face for Pebble
 
-Inspired by the simple design of Official Swiss Railways Watch.
+Inspired by the Official Swiss Railways (SBB / Mondaine) watch.
 
-This project took my favorite watch face "Swiss Square" and brought it 10 years into the future to work on new Pebble hardware with new SDK.
+**Author:** Lawrence Hon
 
-Original work by Johnny Lim's Mondaine watchface, reworked by Leo Lin and modernized by us.
+This project is based on **[Maartje Eyskens’s ModernSwiss](https://github.com/meyskens/ModernSwiss)**, which brought the classic “Swiss Square” face forward for reborn Pebble hardware and the modern SDK. Earlier lineage: Johnny Lim’s Mondaine watchface, reworked by Leo Lin.
+
+SwissCorners adds configurable corner complications and a battery-friendly second-hand mode.
+
+## Features
+
+- Swiss railway dial (white / black / no-logo / round face on square watches)
+- Quartz or Stop2Go second hand, or off
+- **On backlight** second hand: shows seconds only while the backlight is on, then drops to once-a-minute updates to save battery
+- Optional date window on the dial
+- Hourly vibration and Bluetooth connect/disconnect alerts
+- Clay settings page for appearance and complications
 
 ## Complications
 
-Four corner complications are configurable from the settings page (each with its own color):
+Four corner complications (rectangular watches only — not shown on Pebble Time Round / Round 2). Each corner has its own type and color.
 
 | Corner | Default |
 |--------|---------|
@@ -17,10 +28,18 @@ Four corner complications are configurable from the settings page (each with its
 | Bottom left | Steps (`1.2k`) |
 | Bottom right | Date (1–31) |
 
-Other options: heart rate, sunrise, sunset, weather icon, or off.
+Also available: heart rate, sunrise, sunset, weather icon, or off. Temperature unit (°C / °F) is configurable.
 
-Weather data uses Open-Meteo via the phone (location permission). Steps and heart rate use Pebble Health where available.
+Weather, sunrise, and sunset come from Open-Meteo via the phone (location permission). Steps and heart rate use Pebble Health where available.
+
+## Building
+
+```bash
+npm install
+pebble build
+pebble install --emulator basalt   # or chalk, gabbro, emery, etc.
+```
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE). Based on ModernSwiss (MIT) by Maartje Eyskens.

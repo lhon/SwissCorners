@@ -1,20 +1,20 @@
 {
-  "name": "ModernSwiss",
-  "version": "1.1.0",
-  "description": "ModernSwiss Watchface - SBB style on reborn Pebble",
+  "name": "SwissCorners",
+  "version": "1.0.0",
+  "description": "SwissCorners Watchface - SBB style with corner complications",
   "main": "src/js/app.js",
   "keywords": [
     "pebble",
     "watchface"
   ],
-  "author": "Maartje Eyskens",
+  "author": "Lawrence Hon",
   "license": "MIT",
   "dependencies": {
     "@rebble/clay": "^1.0.10"
   },
   "pebble": {
-    "displayName": "ModernSwiss",
-    "uuid": "8c950574-2e93-4dff-97d1-d8fe5cdb9b6c",
+    "displayName": "SwissCorners",
+    "uuid": "afd7e676-d148-48bb-a258-b6815d3c30a6",
     "sdkVersion": "3",
     "enableMultiJS": true,
     "capabilities": [

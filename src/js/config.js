@@ -13,7 +13,7 @@ var complicationOptions = [
 module.exports = [
   {
     "type": "heading",
-    "defaultValue": "ModernSwiss Settings"
+    "defaultValue": "SwissCorners Settings"
   },
   {
     "type": "text",

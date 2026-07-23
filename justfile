@@ -1,4 +1,4 @@
-# Swiss Square Justfile - Rebble SDK
+# SwissCorners Justfile - Rebble SDK
 
 # Default recipe - show available commands
 default:

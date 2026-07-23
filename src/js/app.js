@@ -1,9 +1,9 @@
-// ModernSwiss Watchface - PebbleKit JS with Clay + weather
+// SwissCorners Watchface - PebbleKit JS with Clay + weather
 var Clay = require('@rebble/clay');
 var clayConfig = require('./config');
 var clay = new Clay(clayConfig);
 
-console.log('ModernSwiss: JS app initialized');
+console.log('SwissCorners: JS app initialized');
 
 var xhrRequest = function (url, type, callback) {
   var xhr = new XMLHttpRequest();
