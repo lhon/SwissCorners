@@ -1,6 +1,6 @@
 {
   "name": "ModernSwiss",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "ModernSwiss Watchface - SBB style on reborn Pebble",
   "main": "src/js/app.js",
   "keywords": [
@@ -17,6 +17,10 @@
     "uuid": "8c950574-2e93-4dff-97d1-d8fe5cdb9b6c",
     "sdkVersion": "3",
     "enableMultiJS": true,
+    "capabilities": [
+      "location",
+      "health"
+    ],
     "targetPlatforms": [
       "aplite",
       "basalt",
@@ -35,7 +39,21 @@
       "DateOption": 2,
       "HourlyVibration": 3,
       "BluetoothStatusDetection": 4,
-      "RoundBackgroundColor": 5
+      "RoundBackgroundColor": 5,
+      "CompTL": 6,
+      "CompTLColor": 7,
+      "CompTR": 8,
+      "CompTRColor": 9,
+      "CompBL": 10,
+      "CompBLColor": 11,
+      "CompBR": 12,
+      "CompBRColor": 13,
+      "TempUnit": 14,
+      "Temperature": 15,
+      "WeatherCode": 16,
+      "Sunrise": 17,
+      "Sunset": 18,
+      "RequestWeather": 19
     },
     "resources": {
       "media": [

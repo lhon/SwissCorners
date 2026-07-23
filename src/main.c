@@ -115,8 +115,8 @@ const GPathInfo HOUR_HAND_POINTS_GABBRO = {
   }
 };
 
-// Persistent storage key
-#define SETTINGS_KEY 1
+// Persistent storage key (bumped for complications settings)
+#define SETTINGS_KEY 2
 
 // Message keys from package.json
 #define MESSAGE_KEY_DialColor 0
@@ -125,6 +125,28 @@ const GPathInfo HOUR_HAND_POINTS_GABBRO = {
 #define MESSAGE_KEY_HourlyVibration 3
 #define MESSAGE_KEY_BluetoothStatusDetection 4
 #define MESSAGE_KEY_RoundBackgroundColor 5
+#define MESSAGE_KEY_CompTL 6
+#define MESSAGE_KEY_CompTLColor 7
+#define MESSAGE_KEY_CompTR 8
+#define MESSAGE_KEY_CompTRColor 9
+#define MESSAGE_KEY_CompBL 10
+#define MESSAGE_KEY_CompBLColor 11
+#define MESSAGE_KEY_CompBR 12
+#define MESSAGE_KEY_CompBRColor 13
+#define MESSAGE_KEY_TempUnit 14
+#define MESSAGE_KEY_Temperature 15
+#define MESSAGE_KEY_WeatherCode 16
+#define MESSAGE_KEY_Sunrise 17
+#define MESSAGE_KEY_Sunset 18
+#define MESSAGE_KEY_RequestWeather 19
+
+typedef enum {
+  CORNER_TL = 0,
+  CORNER_TR = 1,
+  CORNER_BL = 2,
+  CORNER_BR = 3,
+  CORNER_COUNT = 4
+} Corner;
 
 typedef struct ClaySettings {
   char dialcolor[12];
@@ -133,12 +155,23 @@ typedef struct ClaySettings {
   char hourlyvibration[10];
   uint8_t bluetoothstatusdetection;
   char roundbackgroundcolor[7];  // Hex color string (e.g., "FF0000")
+  char comp_type[CORNER_COUNT][12];
+  char comp_color[CORNER_COUNT][7];
+  char tempunit[2];  // "c" or "f"
 } ClaySettings;
 
 static ClaySettings settings;
 
+// Weather data from phone (Celsius; converted on display)
+static int s_temperature_c = 0;
+static bool s_temperature_valid = false;
+static int s_weather_code = -1;
+static int s_sunrise_mins = -1;
+static int s_sunset_mins = -1;
+
 static Window *s_window;
 static Layer *s_hands_layer;
+static Layer *s_complications_layer;
 
 static BitmapLayer *s_background_layer;
 static GBitmap *s_background_bitmap;
@@ -151,6 +184,7 @@ static GPath *s_minute_arrow_emery, *s_hour_arrow_emery;
 static GPath *s_minute_arrow_gabbro, *s_hour_arrow_gabbro;
 
 static GFont s_res_gothic_18_bold;
+static GFont s_comp_font;
 static TextLayer *s_textlayer_date;
 
 static Window *bluetooth_connected_splash_window;
@@ -203,6 +237,238 @@ static void parse_hex_color(const char *hex, uint8_t *r, uint8_t *g, uint8_t *b)
   *b = (hex_char_to_val(ptr[4]) << 4) | hex_char_to_val(ptr[5]);  
 }
 
+// Convert hex color string to GColor (B&W falls back by brightness)
+static GColor color_from_hex_str(const char *hex) {
+  uint8_t r, g, b;
+  parse_hex_color(hex, &r, &g, &b);
+  #ifdef PBL_COLOR
+    return GColorFromRGB(r, g, b);
+  #else
+    return ((r + g + b) / 3) > 127 ? GColorWhite : GColorBlack;
+  #endif
+}
+
+static void format_steps(char *buf, size_t n, int steps) {
+  if (steps < 0) {
+    snprintf(buf, n, "--");
+  } else if (steps < 1000) {
+    snprintf(buf, n, "%d", steps);
+  } else if (steps < 10000) {
+    // e.g. 1.2k
+    snprintf(buf, n, "%d.%dk", steps / 1000, (steps % 1000) / 100);
+  } else {
+    snprintf(buf, n, "%dk", steps / 1000);
+  }
+}
+
+static void format_clock_mins(char *buf, size_t n, int mins) {
+  if (mins < 0) {
+    snprintf(buf, n, "--");
+    return;
+  }
+  int h = (mins / 60) % 24;
+  int m = mins % 60;
+  if (clock_is_24h_style()) {
+    snprintf(buf, n, "%d:%02d", h, m);
+  } else {
+    int h12 = h % 12;
+    if (h12 == 0) h12 = 12;
+    snprintf(buf, n, "%d:%02d", h12, m);
+  }
+}
+
+static int get_steps_today(void) {
+  #if defined(PBL_HEALTH)
+    if (health_service_metric_accessible(HealthMetricStepCount,
+          time_start_of_today(), time(NULL)) & HealthServiceAccessibilityMaskAvailable) {
+      return (int)health_service_sum_today(HealthMetricStepCount);
+    }
+  #endif
+  return -1;
+}
+
+static int get_heart_rate(void) {
+  #if defined(PBL_HEALTH)
+    time_t now = time(NULL);
+    if (health_service_metric_accessible(HealthMetricHeartRateBPM, now - 900, now)
+          & HealthServiceAccessibilityMaskAvailable) {
+      HealthValue hr = health_service_peek_current_value(HealthMetricHeartRateBPM);
+      if (hr > 0) {
+        return (int)hr;
+      }
+    }
+  #endif
+  return -1;
+}
+
+static void request_weather(void) {
+  DictionaryIterator *iter;
+  if (app_message_outbox_begin(&iter) != APP_MSG_OK) {
+    return;
+  }
+  dict_write_uint8(iter, MESSAGE_KEY_RequestWeather, 1);
+  app_message_outbox_send();
+}
+
+static void draw_weather_icon(GContext *ctx, GPoint center, int code, GColor color) {
+  graphics_context_set_stroke_color(ctx, color);
+  graphics_context_set_fill_color(ctx, color);
+  #ifdef PBL_COLOR
+    graphics_context_set_stroke_width(ctx, 1);
+  #endif
+
+  if (code < 0) {
+    graphics_draw_circle(ctx, center, 5);
+    return;
+  }
+
+  // WMO weather interpretation codes
+  if (code == 0) {
+    // Clear — sun disc
+    graphics_fill_circle(ctx, center, 5);
+  } else if (code <= 3) {
+    // Cloudy
+    graphics_fill_circle(ctx, GPoint(center.x - 3, center.y), 4);
+    graphics_fill_circle(ctx, GPoint(center.x + 3, center.y + 1), 5);
+  } else if (code <= 48) {
+    // Fog — horizontal lines
+    for (int i = -4; i <= 4; i += 3) {
+      graphics_draw_line(ctx, GPoint(center.x - 7, center.y + i), GPoint(center.x + 7, center.y + i));
+    }
+  } else if (code <= 67 || (code >= 80 && code <= 82)) {
+    // Rain / showers — cloud + drops
+    graphics_fill_circle(ctx, GPoint(center.x - 2, center.y - 2), 4);
+    graphics_fill_circle(ctx, GPoint(center.x + 3, center.y - 1), 4);
+    graphics_draw_line(ctx, GPoint(center.x - 3, center.y + 3), GPoint(center.x - 4, center.y + 7));
+    graphics_draw_line(ctx, GPoint(center.x + 1, center.y + 3), GPoint(center.x, center.y + 7));
+    graphics_draw_line(ctx, GPoint(center.x + 5, center.y + 3), GPoint(center.x + 4, center.y + 7));
+  } else if (code <= 77 || (code >= 85 && code <= 86)) {
+    // Snow
+    graphics_fill_circle(ctx, GPoint(center.x - 2, center.y - 2), 4);
+    graphics_fill_circle(ctx, GPoint(center.x + 3, center.y - 1), 4);
+    graphics_draw_pixel(ctx, GPoint(center.x - 3, center.y + 5));
+    graphics_draw_pixel(ctx, GPoint(center.x + 1, center.y + 6));
+    graphics_draw_pixel(ctx, GPoint(center.x + 5, center.y + 5));
+  } else {
+    // Thunderstorm — zigzag
+    graphics_draw_line(ctx, GPoint(center.x + 2, center.y - 7), GPoint(center.x - 2, center.y));
+    graphics_draw_line(ctx, GPoint(center.x - 2, center.y), GPoint(center.x + 3, center.y));
+    graphics_draw_line(ctx, GPoint(center.x + 3, center.y), GPoint(center.x - 1, center.y + 7));
+  }
+}
+
+static bool complication_text(Corner corner, char *buf, size_t n) {
+  const char *type = settings.comp_type[corner];
+  buf[0] = '\0';
+
+  if (strcmp(type, "off") == 0) {
+    return false;
+  }
+  if (strcmp(type, "weather") == 0) {
+    return false;  // drawn as icon
+  }
+
+  time_t now = time(NULL);
+  struct tm *t = localtime(&now);
+
+  if (strcmp(type, "temp") == 0) {
+    if (!s_temperature_valid) {
+      snprintf(buf, n, "--");
+    } else {
+      int temp = s_temperature_c;
+      if (strcmp(settings.tempunit, "f") == 0) {
+        temp = (s_temperature_c * 9) / 5 + 32;
+      }
+      snprintf(buf, n, "%d\xC2\xB0", temp);
+    }
+  } else if (strcmp(type, "steps") == 0) {
+    format_steps(buf, n, get_steps_today());
+  } else if (strcmp(type, "day") == 0) {
+    strftime(buf, n, "%a", t);
+  } else if (strcmp(type, "date") == 0) {
+    snprintf(buf, n, "%d", t->tm_mday);
+  } else if (strcmp(type, "hr") == 0) {
+    int hr = get_heart_rate();
+    if (hr <= 0) {
+      snprintf(buf, n, "--");
+    } else {
+      snprintf(buf, n, "%d", hr);
+    }
+  } else if (strcmp(type, "sunrise") == 0) {
+    format_clock_mins(buf, n, s_sunrise_mins);
+  } else if (strcmp(type, "sunset") == 0) {
+    format_clock_mins(buf, n, s_sunset_mins);
+  } else {
+    return false;
+  }
+  return true;
+}
+
+static GRect complication_rect(Corner corner, GRect bounds) {
+  const int16_t box_w = 52;
+  const int16_t box_h = 22;
+  #if defined(PBL_ROUND)
+    #if PBL_DISPLAY_WIDTH >= 260
+      const int16_t pad_x = 28;
+      const int16_t pad_y = 28;
+    #else
+      const int16_t pad_x = 18;
+      const int16_t pad_y = 18;
+    #endif
+  #else
+    #if PBL_DISPLAY_WIDTH >= 200
+      const int16_t pad_x = 6;
+      const int16_t pad_y = 4;
+    #else
+      const int16_t pad_x = 2;
+      const int16_t pad_y = 0;
+    #endif
+  #endif
+
+  switch (corner) {
+    case CORNER_TL:
+      return GRect(pad_x, pad_y, box_w, box_h);
+    case CORNER_TR:
+      return GRect(bounds.size.w - pad_x - box_w, pad_y, box_w, box_h);
+    case CORNER_BL:
+      return GRect(pad_x, bounds.size.h - pad_y - box_h, box_w, box_h);
+    case CORNER_BR:
+    default:
+      return GRect(bounds.size.w - pad_x - box_w, bounds.size.h - pad_y - box_h, box_w, box_h);
+  }
+}
+
+static void complications_update_proc(Layer *layer, GContext *ctx) {
+  GRect bounds = layer_get_bounds(layer);
+  static char buf[12];
+
+  for (int i = 0; i < CORNER_COUNT; i++) {
+    Corner corner = (Corner)i;
+    if (strcmp(settings.comp_type[corner], "off") == 0) {
+      continue;
+    }
+
+    GColor color = color_from_hex_str(settings.comp_color[corner]);
+    GRect rect = complication_rect(corner, bounds);
+    GTextAlignment align = (corner == CORNER_TL || corner == CORNER_BL)
+      ? GTextAlignmentLeft : GTextAlignmentRight;
+
+    if (strcmp(settings.comp_type[corner], "weather") == 0) {
+      int16_t cx = (align == GTextAlignmentLeft) ? rect.origin.x + 8 : rect.origin.x + rect.size.w - 8;
+      int16_t cy = rect.origin.y + rect.size.h / 2;
+      draw_weather_icon(ctx, GPoint(cx, cy), s_weather_code, color);
+      continue;
+    }
+
+    if (!complication_text(corner, buf, sizeof(buf))) {
+      continue;
+    }
+
+    graphics_context_set_text_color(ctx, color);
+    graphics_draw_text(ctx, buf, s_comp_font, rect, GTextOverflowModeTrailingEllipsis, align, NULL);
+  }
+}
+
 // Default settings
 static void prv_default_settings() {
   strcpy(settings.dialcolor, "round");
@@ -211,6 +477,14 @@ static void prv_default_settings() {
   strcpy(settings.hourlyvibration, "off");
   settings.bluetoothstatusdetection = 0;
   strcpy(settings.roundbackgroundcolor, "FFFFFF");  // Default to white
+  strcpy(settings.comp_type[CORNER_TL], "temp");
+  strcpy(settings.comp_type[CORNER_TR], "day");
+  strcpy(settings.comp_type[CORNER_BL], "steps");
+  strcpy(settings.comp_type[CORNER_BR], "date");
+  for (int i = 0; i < CORNER_COUNT; i++) {
+    strcpy(settings.comp_color[i], "000000");
+  }
+  strcpy(settings.tempunit, "c");
 }
 
 // Save settings to persistent storage
@@ -238,9 +512,8 @@ static void prv_load_settings() {
   if (persist_exists(SETTINGS_KEY)) {
     ClaySettings saved_settings;
     int bytes_read = persist_read_data(SETTINGS_KEY, &saved_settings, sizeof(saved_settings));
-    
-    // Only copy settings if we read enough bytes
-    if (bytes_read >= (int)(sizeof(saved_settings) - sizeof(saved_settings.roundbackgroundcolor))) {
+
+    if (bytes_read >= (int)sizeof(ClaySettings)) {
       settings = saved_settings;
       // Ensure null termination for safety
       settings.dialcolor[sizeof(settings.dialcolor) - 1] = '\0';
@@ -248,14 +521,20 @@ static void prv_load_settings() {
       settings.dateoption[sizeof(settings.dateoption) - 1] = '\0';
       settings.hourlyvibration[sizeof(settings.hourlyvibration) - 1] = '\0';
       settings.roundbackgroundcolor[sizeof(settings.roundbackgroundcolor) - 1] = '\0';
-      
-      // Validate the color string - if invalid, reset to default
+      settings.tempunit[sizeof(settings.tempunit) - 1] = '\0';
+      for (int i = 0; i < CORNER_COUNT; i++) {
+        settings.comp_type[i][sizeof(settings.comp_type[i]) - 1] = '\0';
+        settings.comp_color[i][sizeof(settings.comp_color[i]) - 1] = '\0';
+        if (!is_valid_hex_string(settings.comp_color[i], 6)) {
+          strcpy(settings.comp_color[i], "000000");
+        }
+      }
+
       if (!is_valid_hex_string(settings.roundbackgroundcolor, 6)) {
-        APP_LOG(APP_LOG_LEVEL_WARNING, "prv_load_settings: invalid color '%s', resetting to default", settings.roundbackgroundcolor);
+        APP_LOG(APP_LOG_LEVEL_WARNING, "prv_load_settings: invalid color '%s', resetting", settings.roundbackgroundcolor);
         strcpy(settings.roundbackgroundcolor, "000000");
       }
-      
-    } 
+    }
   }
 }
 
@@ -357,68 +636,155 @@ static void prv_update_display() {
   
   // Mark hands layer dirty to redraw with new colors
   layer_mark_dirty(s_hands_layer);
+  if (s_complications_layer) {
+    layer_mark_dirty(s_complications_layer);
+  }
+}
+
+static void copy_cstring_setting(char *dest, size_t dest_size, Tuple *t) {
+  if (!t || !dest || dest_size == 0) return;
+  strncpy(dest, t->value->cstring, dest_size - 1);
+  dest[dest_size - 1] = '\0';
+}
+
+static void copy_color_setting(char *dest, size_t dest_size, Tuple *t) {
+  if (!t || !dest || dest_size < 7) return;
+  uint32_t value = (uint32_t)t->value->int32;
+  snprintf(dest, dest_size, "%06lX", (unsigned long)value);
 }
 
 // Handle incoming AppMessage
 static void inbox_received_callback(DictionaryIterator *iterator, void *context) {
   APP_LOG(APP_LOG_LEVEL_INFO, "inbox_received: START");
-  
+  bool settings_changed = false;
+  bool weather_changed = false;
+
   // Dial Color
   Tuple *dial_color_t = dict_find(iterator, MESSAGE_KEY_DialColor);
   if (dial_color_t) {
-    strncpy(settings.dialcolor, dial_color_t->value->cstring, sizeof(settings.dialcolor) - 1);
-    settings.dialcolor[sizeof(settings.dialcolor) - 1] = '\0';
+    copy_cstring_setting(settings.dialcolor, sizeof(settings.dialcolor), dial_color_t);
+    settings_changed = true;
   }
-  
+
   // Second Hand Option
   Tuple *second_hand_t = dict_find(iterator, MESSAGE_KEY_SecondHandOption);
   if (second_hand_t) {
-    strncpy(settings.secondhandoption, second_hand_t->value->cstring, sizeof(settings.secondhandoption) - 1);
-    settings.secondhandoption[sizeof(settings.secondhandoption) - 1] = '\0';
-    
-    // Update tick timer subscription
+    copy_cstring_setting(settings.secondhandoption, sizeof(settings.secondhandoption), second_hand_t);
+
     tick_timer_service_unsubscribe();
     if (strcmp(settings.secondhandoption, "off") == 0) {
       tick_timer_service_subscribe(MINUTE_UNIT, handle_tick);
     } else {
       tick_timer_service_subscribe(SECOND_UNIT, handle_tick);
     }
+    settings_changed = true;
   }
-  
+
   // Date Option
   Tuple *date_option_t = dict_find(iterator, MESSAGE_KEY_DateOption);
   if (date_option_t) {
-    strncpy(settings.dateoption, date_option_t->value->cstring, sizeof(settings.dateoption) - 1);
-    settings.dateoption[sizeof(settings.dateoption) - 1] = '\0';
+    copy_cstring_setting(settings.dateoption, sizeof(settings.dateoption), date_option_t);
+    settings_changed = true;
   }
-  
+
   // Hourly Vibration
   Tuple *hourly_vib_t = dict_find(iterator, MESSAGE_KEY_HourlyVibration);
   if (hourly_vib_t) {
-    strncpy(settings.hourlyvibration, hourly_vib_t->value->cstring, sizeof(settings.hourlyvibration) - 1);
-    settings.hourlyvibration[sizeof(settings.hourlyvibration) - 1] = '\0';
+    copy_cstring_setting(settings.hourlyvibration, sizeof(settings.hourlyvibration), hourly_vib_t);
+    settings_changed = true;
   }
-  
+
   // Bluetooth Status Detection
   Tuple *bt_status_t = dict_find(iterator, MESSAGE_KEY_BluetoothStatusDetection);
   if (bt_status_t) {
     settings.bluetoothstatusdetection = bt_status_t->value->uint8;
+    settings_changed = true;
   }
 
   // Round Background Color
   Tuple *round_bg_color_t = dict_find(iterator, MESSAGE_KEY_RoundBackgroundColor);
   if (round_bg_color_t) {
-    APP_LOG(APP_LOG_LEVEL_INFO, "inbox_received: RoundBackgroundColor int=%d", (int)round_bg_color_t->value->int32);
-    // Convert integer to hex string
-    uint32_t value = (uint32_t)round_bg_color_t->value->int32;
-    snprintf(settings.roundbackgroundcolor, sizeof(settings.roundbackgroundcolor), "%06lX", value);
-    APP_LOG(APP_LOG_LEVEL_INFO, "inbox_received: saved roundbackgroundcolor='%s'", settings.roundbackgroundcolor);
+    copy_color_setting(settings.roundbackgroundcolor, sizeof(settings.roundbackgroundcolor), round_bg_color_t);
+    settings_changed = true;
   }
-  
-  // Save and update display if any settings changed
-  if (dial_color_t || second_hand_t || date_option_t || hourly_vib_t || bt_status_t || round_bg_color_t) {
+
+  // Complications
+  Tuple *comp_tl_t = dict_find(iterator, MESSAGE_KEY_CompTL);
+  if (comp_tl_t) {
+    copy_cstring_setting(settings.comp_type[CORNER_TL], sizeof(settings.comp_type[CORNER_TL]), comp_tl_t);
+    settings_changed = true;
+  }
+  Tuple *comp_tl_c_t = dict_find(iterator, MESSAGE_KEY_CompTLColor);
+  if (comp_tl_c_t) {
+    copy_color_setting(settings.comp_color[CORNER_TL], sizeof(settings.comp_color[CORNER_TL]), comp_tl_c_t);
+    settings_changed = true;
+  }
+  Tuple *comp_tr_t = dict_find(iterator, MESSAGE_KEY_CompTR);
+  if (comp_tr_t) {
+    copy_cstring_setting(settings.comp_type[CORNER_TR], sizeof(settings.comp_type[CORNER_TR]), comp_tr_t);
+    settings_changed = true;
+  }
+  Tuple *comp_tr_c_t = dict_find(iterator, MESSAGE_KEY_CompTRColor);
+  if (comp_tr_c_t) {
+    copy_color_setting(settings.comp_color[CORNER_TR], sizeof(settings.comp_color[CORNER_TR]), comp_tr_c_t);
+    settings_changed = true;
+  }
+  Tuple *comp_bl_t = dict_find(iterator, MESSAGE_KEY_CompBL);
+  if (comp_bl_t) {
+    copy_cstring_setting(settings.comp_type[CORNER_BL], sizeof(settings.comp_type[CORNER_BL]), comp_bl_t);
+    settings_changed = true;
+  }
+  Tuple *comp_bl_c_t = dict_find(iterator, MESSAGE_KEY_CompBLColor);
+  if (comp_bl_c_t) {
+    copy_color_setting(settings.comp_color[CORNER_BL], sizeof(settings.comp_color[CORNER_BL]), comp_bl_c_t);
+    settings_changed = true;
+  }
+  Tuple *comp_br_t = dict_find(iterator, MESSAGE_KEY_CompBR);
+  if (comp_br_t) {
+    copy_cstring_setting(settings.comp_type[CORNER_BR], sizeof(settings.comp_type[CORNER_BR]), comp_br_t);
+    settings_changed = true;
+  }
+  Tuple *comp_br_c_t = dict_find(iterator, MESSAGE_KEY_CompBRColor);
+  if (comp_br_c_t) {
+    copy_color_setting(settings.comp_color[CORNER_BR], sizeof(settings.comp_color[CORNER_BR]), comp_br_c_t);
+    settings_changed = true;
+  }
+
+  Tuple *temp_unit_t = dict_find(iterator, MESSAGE_KEY_TempUnit);
+  if (temp_unit_t) {
+    copy_cstring_setting(settings.tempunit, sizeof(settings.tempunit), temp_unit_t);
+    settings_changed = true;
+  }
+
+  // Weather data from phone
+  Tuple *temp_t = dict_find(iterator, MESSAGE_KEY_Temperature);
+  if (temp_t) {
+    s_temperature_c = (int)temp_t->value->int32;
+    s_temperature_valid = true;
+    weather_changed = true;
+  }
+  Tuple *weather_code_t = dict_find(iterator, MESSAGE_KEY_WeatherCode);
+  if (weather_code_t) {
+    s_weather_code = (int)weather_code_t->value->int32;
+    weather_changed = true;
+  }
+  Tuple *sunrise_t = dict_find(iterator, MESSAGE_KEY_Sunrise);
+  if (sunrise_t) {
+    s_sunrise_mins = (int)sunrise_t->value->int32;
+    weather_changed = true;
+  }
+  Tuple *sunset_t = dict_find(iterator, MESSAGE_KEY_Sunset);
+  if (sunset_t) {
+    s_sunset_mins = (int)sunset_t->value->int32;
+    weather_changed = true;
+  }
+
+  if (settings_changed) {
     prv_save_settings();
     prv_update_display();
+    request_weather();
+  } else if (weather_changed && s_complications_layer) {
+    layer_mark_dirty(s_complications_layer);
   }
 }
 
@@ -671,6 +1037,7 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
 }
 
 void handle_tick(struct tm *t, TimeUnits units_changed) {
+  (void)units_changed;
   if (strcmp(settings.secondhandoption, "stop2go") == 0) {
     for (int i = 0; i < STOP2GO_TICK_RESOLUTION; i++) {
       app_timer_register(1000 / STOP2GO_TICK_RESOLUTION * i, (void*)layer_mark_dirty, window_get_root_layer(s_window));
@@ -678,7 +1045,12 @@ void handle_tick(struct tm *t, TimeUnits units_changed) {
   } else {
     layer_mark_dirty(window_get_root_layer(s_window));
   }
-  
+
+  // Refresh weather every 30 minutes
+  if (t->tm_min % 30 == 0 && t->tm_sec == 0) {
+    request_weather();
+  }
+
   // Hourly vibration
   if (t->tm_min == 0 && t->tm_sec == 0) {
     if (strcmp(settings.hourlyvibration, "short") == 0) {
@@ -727,6 +1099,21 @@ static void hide_bluetooth_connected_splash_window() {
 
 static void hide_bluetooth_disconnected_splash_window() {
   window_stack_remove(bluetooth_disconnected_splash_window, true);
+}
+
+#if defined(PBL_HEALTH)
+static void health_handler(HealthEventType event, void *context) {
+  (void)event;
+  (void)context;
+  if (s_complications_layer) {
+    layer_mark_dirty(s_complications_layer);
+  }
+}
+#endif
+
+static void request_weather_timer(void *data) {
+  (void)data;
+  request_weather();
 }
 
 static void handle_bluetooth_connected() {
@@ -835,6 +1222,7 @@ static void window_load(Window *window) {
   strftime(date, sizeof(date), "%d", t);
 
   s_res_gothic_18_bold = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  s_comp_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
 
   // Position date layer - adjust for round watchface mode
   if (strcmp(settings.dialcolor, "round") == 0) {
@@ -868,7 +1256,12 @@ static void window_load(Window *window) {
   if (strcmp(settings.dateoption, "nodate") == 0) {
     layer_set_hidden((Layer *)s_textlayer_date, true);
   }
-  
+
+  // Corner complications (below hands so hands draw on top)
+  s_complications_layer = layer_create(bounds);
+  layer_set_update_proc(s_complications_layer, complications_update_proc);
+  layer_add_child(window_layer, s_complications_layer);
+
   // Initialize hands layer
   s_hands_layer = layer_create(bounds);
   layer_set_update_proc(s_hands_layer, hands_update_proc);
@@ -892,24 +1285,26 @@ static void window_unload(Window *window) {
   gpath_destroy(s_hour_arrow_gabbro);
 
   layer_destroy(s_hands_layer);
+  if (s_complications_layer) {
+    layer_destroy(s_complications_layer);
+    s_complications_layer = NULL;
+  }
   text_layer_destroy(s_textlayer_date);
 }
 
 static void init() {
   // Load settings first
   prv_load_settings();
-  
-  // Set up AppMessage with larger buffers for Clay
-  const int inbox_size = 256;
+
+  // Set up AppMessage with larger buffers for Clay + weather
+  const int inbox_size = 1024;
   const int outbox_size = 256;
-  app_message_open(inbox_size, outbox_size);
-  
-  // Register AppMessage callbacks
   app_message_register_inbox_received(inbox_received_callback);
   app_message_register_inbox_dropped(inbox_dropped_callback);
   app_message_register_outbox_failed(outbox_failed_callback);
   app_message_register_outbox_sent(outbox_sent_callback);
-  
+  app_message_open(inbox_size, outbox_size);
+
   // Create main window
   s_window = window_create();
   window_set_window_handlers(s_window, (WindowHandlers) {
@@ -944,40 +1339,51 @@ static void init() {
   gpath_move_to(s_hour_arrow_emery, center);
   gpath_move_to(s_minute_arrow_gabbro, center);
   gpath_move_to(s_hour_arrow_gabbro, center);
-  
+
   // Subscribe to tick timer
   if (strcmp(settings.secondhandoption, "off") == 0) {
     tick_timer_service_subscribe(MINUTE_UNIT, handle_tick);
   } else {
     tick_timer_service_subscribe(SECOND_UNIT, handle_tick);
   }
-  
+
+  #if defined(PBL_HEALTH)
+  health_service_events_subscribe(health_handler, NULL);
+  #endif
+
   // Bluetooth status detection
   bluetooth_connected_splash_window = window_create();
   window_set_window_handlers(bluetooth_connected_splash_window, (WindowHandlers) {
     .load = bluetooth_connected_splash_window_load,
     .unload = bluetooth_connected_window_unload,
   });
-  
+
   bluetooth_disconnected_splash_window = window_create();
   window_set_window_handlers(bluetooth_disconnected_splash_window, (WindowHandlers) {
     .load = bluetooth_disconnected_splash_window_load,
     .unload = bluetooth_disconnected_window_unload,
   });
-  
+
   // Check bluetooth connection on startup
   startup_bluetooth_disconnection_callback(bluetooth_connection_service_peek());
-  
+
   bluetooth_connection_service_subscribe(bluetooth_connection_callback);
+
+  // Ask phone for weather once AppMessage is open
+  app_timer_register(500, request_weather_timer, NULL);
 }
 
 static void deinit() {
   prv_save_settings();
-  
+
+  #if defined(PBL_HEALTH)
+  health_service_events_unsubscribe();
+  #endif
+
   bluetooth_connection_service_unsubscribe();
   tick_timer_service_unsubscribe();
   app_message_deregister_callbacks();
-  
+
   window_destroy(s_window);
   window_destroy(bluetooth_connected_splash_window);
   window_destroy(bluetooth_disconnected_splash_window);
