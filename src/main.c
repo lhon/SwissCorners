@@ -405,8 +405,8 @@ static bool complication_text(Corner corner, char *buf, size_t n) {
 }
 
 static GRect complication_rect(Corner corner, GRect bounds) {
-  const int16_t box_w = 52;
-  const int16_t box_h = 22;
+  const int16_t box_w = 56;
+  const int16_t box_h = 28;
   #if defined(PBL_ROUND)
     #if PBL_DISPLAY_WIDTH >= 260
       const int16_t pad_x = 28;
@@ -1222,7 +1222,7 @@ static void window_load(Window *window) {
   strftime(date, sizeof(date), "%d", t);
 
   s_res_gothic_18_bold = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
-  s_comp_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  s_comp_font = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
 
   // Position date layer - adjust for round watchface mode
   if (strcmp(settings.dialcolor, "round") == 0) {
