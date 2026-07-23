@@ -160,10 +160,15 @@ module.exports = [
             "value": "stop2go"
           },
           {
+            "label": "On backlight",
+            "value": "backlight"
+          },
+          {
             "label": "Off",
             "value": "off"
           }
-        ]
+        ],
+        "description": "On backlight shows the second hand only while the light is on, then drops to once-a-minute updates to save battery."
       }
     ]
   },

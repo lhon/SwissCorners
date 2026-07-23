@@ -169,6 +169,12 @@ static int s_weather_code = -1;
 static int s_sunrise_mins = -1;
 static int s_sunset_mins = -1;
 
+// Backlight seconds mode: show second hand only while light is on
+static bool s_show_seconds = false;
+#if !defined(_PBL_API_EXISTS_backlight_service_subscribe)
+static AppTimer *s_backlight_approx_timer = NULL;
+#endif
+
 static Window *s_window;
 static Layer *s_hands_layer;
 static Layer *s_complications_layer;
@@ -308,6 +314,132 @@ static void request_weather(void) {
   }
   dict_write_uint8(iter, MESSAGE_KEY_RequestWeather, 1);
   app_message_outbox_send();
+}
+
+static bool is_backlight_seconds_mode(void) {
+  return strcmp(settings.secondhandoption, "backlight") == 0;
+}
+
+static bool should_draw_second_hand(void) {
+  if (strcmp(settings.secondhandoption, "off") == 0) {
+    return false;
+  }
+  if (is_backlight_seconds_mode()) {
+    return s_show_seconds;
+  }
+  return strcmp(settings.secondhandoption, "quartz") == 0
+      || strcmp(settings.secondhandoption, "stop2go") == 0;
+}
+
+static void update_tick_subscription(void) {
+  tick_timer_service_unsubscribe();
+  bool need_seconds = false;
+  if (strcmp(settings.secondhandoption, "quartz") == 0
+      || strcmp(settings.secondhandoption, "stop2go") == 0) {
+    need_seconds = true;
+  } else if (is_backlight_seconds_mode()) {
+    need_seconds = s_show_seconds;
+  }
+  tick_timer_service_subscribe(need_seconds ? SECOND_UNIT : MINUTE_UNIT, handle_tick);
+}
+
+static void set_seconds_visible(bool visible) {
+  if (!is_backlight_seconds_mode()) {
+    return;
+  }
+  if (s_show_seconds == visible) {
+    if (visible && s_hands_layer) {
+      layer_mark_dirty(s_hands_layer);
+    }
+    return;
+  }
+  s_show_seconds = visible;
+  update_tick_subscription();
+  if (s_hands_layer) {
+    layer_mark_dirty(s_hands_layer);
+  } else if (s_window) {
+    layer_mark_dirty(window_get_root_layer(s_window));
+  }
+}
+
+#if defined(_PBL_API_EXISTS_backlight_service_subscribe)
+static void backlight_handler(bool on) {
+  set_seconds_visible(on);
+}
+#else
+// Older platforms lack backlight events; approximate with the same
+// triggers the system uses (wrist flick / charger) and a ~3.5s timeout.
+#define BACKLIGHT_APPROX_MS 3500
+
+static void backlight_approx_timeout(void *data) {
+  (void)data;
+  s_backlight_approx_timer = NULL;
+  set_seconds_visible(false);
+}
+
+static void backlight_approx_wake(void) {
+  if (!is_backlight_seconds_mode()) {
+    return;
+  }
+  if (s_backlight_approx_timer) {
+    app_timer_cancel(s_backlight_approx_timer);
+  }
+  set_seconds_visible(true);
+  s_backlight_approx_timer = app_timer_register(BACKLIGHT_APPROX_MS, backlight_approx_timeout, NULL);
+}
+
+static void backlight_approx_tap_handler(AccelAxisType axis, int32_t direction) {
+  (void)axis;
+  (void)direction;
+  backlight_approx_wake();
+}
+
+static void backlight_approx_battery_handler(BatteryChargeState charge) {
+  (void)charge;
+  backlight_approx_wake();
+}
+#endif
+
+static void subscribe_backlight_seconds(void) {
+#if defined(_PBL_API_EXISTS_backlight_service_subscribe)
+  backlight_service_subscribe(backlight_handler);
+  #if defined(_PBL_API_EXISTS_light_is_on)
+    s_show_seconds = light_is_on();
+  #else
+    s_show_seconds = false;
+  #endif
+#else
+  accel_tap_service_subscribe(backlight_approx_tap_handler);
+  battery_state_service_subscribe(backlight_approx_battery_handler);
+  s_show_seconds = false;
+#endif
+}
+
+static void unsubscribe_backlight_seconds(void) {
+#if defined(_PBL_API_EXISTS_backlight_service_subscribe)
+  backlight_service_unsubscribe();
+#else
+  accel_tap_service_unsubscribe();
+  battery_state_service_unsubscribe();
+  if (s_backlight_approx_timer) {
+    app_timer_cancel(s_backlight_approx_timer);
+    s_backlight_approx_timer = NULL;
+  }
+#endif
+  s_show_seconds = false;
+}
+
+static void apply_second_hand_mode(void) {
+  // Tear down any previous backlight subscriptions before applying the new mode
+  unsubscribe_backlight_seconds();
+
+  if (is_backlight_seconds_mode()) {
+    subscribe_backlight_seconds();
+  }
+  update_tick_subscription();
+  if (s_hands_layer) {
+    layer_mark_dirty(s_hands_layer);
+  }
 }
 
 static void draw_weather_icon(GContext *ctx, GPoint center, int code, GColor color) {
@@ -670,13 +802,7 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
   Tuple *second_hand_t = dict_find(iterator, MESSAGE_KEY_SecondHandOption);
   if (second_hand_t) {
     copy_cstring_setting(settings.secondhandoption, sizeof(settings.secondhandoption), second_hand_t);
-
-    tick_timer_service_unsubscribe();
-    if (strcmp(settings.secondhandoption, "off") == 0) {
-      tick_timer_service_subscribe(MINUTE_UNIT, handle_tick);
-    } else {
-      tick_timer_service_subscribe(SECOND_UNIT, handle_tick);
-    }
+    apply_second_hand_mode();
     settings_changed = true;
   }
 
@@ -905,7 +1031,7 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
   gpath_draw_outline(ctx, minute_path);
   
   // Second hand
-  if (strcmp(settings.secondhandoption, "quartz") == 0 || strcmp(settings.secondhandoption, "stop2go") == 0) {
+  if (should_draw_second_hand()) {
     #ifdef PBL_COLOR
       graphics_context_set_fill_color(ctx, GColorRed);
       graphics_context_set_stroke_color(ctx, GColorRed);
@@ -958,11 +1084,7 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
      
     double second_angle = 0;
     
-    if (strcmp(settings.secondhandoption, "quartz") == 0) {
-      second_angle = TRIG_MAX_ANGLE * t->tm_sec / 60;
-    }
-    // Stop2go
-    else if (strcmp(settings.secondhandoption, "stop2go") == 0) {
+    if (strcmp(settings.secondhandoption, "stop2go") == 0) {
       // Move the second hand around the watch in 58 seconds
       // Get current time with milliseconds for smooth animation
       time_t sec;
@@ -978,6 +1100,9 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
         // Pause at 12 o'clock for 2 seconds
         second_angle = 0;
       }
+    } else {
+      // Quartz (and backlight mode while lit)
+      second_angle = TRIG_MAX_ANGLE * t->tm_sec / 60;
     }
     
     // Cast angle to int32_t for trig functions (TRIG_MAX_ANGLE = 65536)
@@ -1340,12 +1465,8 @@ static void init() {
   gpath_move_to(s_minute_arrow_gabbro, center);
   gpath_move_to(s_hour_arrow_gabbro, center);
 
-  // Subscribe to tick timer
-  if (strcmp(settings.secondhandoption, "off") == 0) {
-    tick_timer_service_subscribe(MINUTE_UNIT, handle_tick);
-  } else {
-    tick_timer_service_subscribe(SECOND_UNIT, handle_tick);
-  }
+  // Subscribe to tick timer (and backlight seconds if configured)
+  apply_second_hand_mode();
 
   #if defined(PBL_HEALTH)
   health_service_events_subscribe(health_handler, NULL);
@@ -1375,6 +1496,8 @@ static void init() {
 
 static void deinit() {
   prv_save_settings();
+
+  unsubscribe_backlight_seconds();
 
   #if defined(PBL_HEALTH)
   health_service_events_unsubscribe();
