@@ -171,6 +171,10 @@ static int s_weather_code = -1;
 static int s_sunrise_mins = -1;
 static int s_sunset_mins = -1;
 
+// Cached health data (updated via health_handler, not polled every frame)
+static int s_cached_steps = -1;
+static int s_cached_hr = -1;
+
 // Backlight seconds mode: show second hand only while light is on
 static bool s_show_seconds = false;
 #if !defined(_PBL_API_EXISTS_backlight_service_subscribe)
@@ -521,13 +525,13 @@ static bool complication_text(Corner corner, char *buf, size_t n) {
       snprintf(buf, n, "%d\xC2\xB0", temp);
     }
   } else if (strcmp(type, "steps") == 0) {
-    format_steps(buf, n, get_steps_today());
+    format_steps(buf, n, s_cached_steps >= 0 ? s_cached_steps : get_steps_today());
   } else if (strcmp(type, "day") == 0) {
     strftime(buf, n, "%a", t);
   } else if (strcmp(type, "date") == 0) {
     snprintf(buf, n, "%d", t->tm_mday);
   } else if (strcmp(type, "hr") == 0) {
-    int hr = get_heart_rate();
+    int hr = s_cached_hr > 0 ? s_cached_hr : get_heart_rate();
     if (hr <= 0) {
       snprintf(buf, n, "--");
     } else {
@@ -1199,13 +1203,19 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
 }
 
 void handle_tick(struct tm *t, TimeUnits units_changed) {
-  (void)units_changed;
   if (strcmp(settings.secondhandoption, "stop2go") == 0) {
     for (int i = 0; i < STOP2GO_TICK_RESOLUTION; i++) {
-      app_timer_register(1000 / STOP2GO_TICK_RESOLUTION * i, (void*)layer_mark_dirty, window_get_root_layer(s_window));
+      app_timer_register(1000 / STOP2GO_TICK_RESOLUTION * i, (void*)layer_mark_dirty, s_hands_layer);
     }
   } else {
-    layer_mark_dirty(window_get_root_layer(s_window));
+    layer_mark_dirty(s_hands_layer);
+  }
+
+  // On minute changes, also update complications and date
+  if (units_changed & MINUTE_UNIT) {
+    if (s_complications_layer) {
+      layer_mark_dirty(s_complications_layer);
+    }
   }
 
   // Refresh weather every 30 minutes
@@ -1267,9 +1277,17 @@ static void hide_bluetooth_disconnected_splash_window() {
 static void health_handler(HealthEventType event, void *context) {
   (void)event;
   (void)context;
-  if (s_complications_layer) {
-    layer_mark_dirty(s_complications_layer);
-  }
+  #if !defined(PBL_ROUND)
+    if (event == HealthEventMovementUpdate || event == HealthEventSignificantUpdate) {
+      s_cached_steps = get_steps_today();
+    }
+    if (event == HealthEventHeartRateUpdate || event == HealthEventSignificantUpdate) {
+      s_cached_hr = get_heart_rate();
+    }
+    if (s_complications_layer) {
+      layer_mark_dirty(s_complications_layer);
+    }
+  #endif
 }
 #endif
 
@@ -1514,6 +1532,11 @@ static void init() {
 
   #if defined(PBL_HEALTH)
   health_service_events_subscribe(health_handler, NULL);
+  // Prime the health cache
+  #if !defined(PBL_ROUND)
+    s_cached_steps = get_steps_today();
+    s_cached_hr = get_heart_rate();
+  #endif
   #endif
 
   // Bluetooth status detection
