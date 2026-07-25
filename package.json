@@ -53,7 +53,8 @@
       "WeatherCode": 16,
       "Sunrise": 17,
       "Sunset": 18,
-      "RequestWeather": 19
+      "RequestWeather": 19,
+      "CompFontSize": 20
     },
     "resources": {
       "media": [

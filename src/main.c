@@ -139,6 +139,7 @@ const GPathInfo HOUR_HAND_POINTS_GABBRO = {
 #define MESSAGE_KEY_Sunrise 17
 #define MESSAGE_KEY_Sunset 18
 #define MESSAGE_KEY_RequestWeather 19
+#define MESSAGE_KEY_CompFontSize 20
 
 typedef enum {
   CORNER_TL = 0,
@@ -158,6 +159,7 @@ typedef struct ClaySettings {
   char comp_type[CORNER_COUNT][12];
   char comp_color[CORNER_COUNT][7];
   char tempunit[2];  // "c" or "f"
+  char compfontsize[3];  // "xs", "s", "m", "l"
 } ClaySettings;
 
 static ClaySettings settings;
@@ -541,6 +543,13 @@ static bool complication_text(Corner corner, char *buf, size_t n) {
   return true;
 }
 
+static int16_t comp_font_height() {
+  if (strcmp(settings.compfontsize, "xs") == 0) return 17;
+  if (strcmp(settings.compfontsize, "s") == 0) return 21;
+  if (strcmp(settings.compfontsize, "l") == 0) return 32;
+  return 28;
+}
+
 static GRect complication_rect(Corner corner, GRect bounds) {
   const int16_t box_w = 56;
   const int16_t box_h = 28;
@@ -558,10 +567,10 @@ static GRect complication_rect(Corner corner, GRect bounds) {
     case CORNER_TR:
       return GRect(bounds.size.w - pad_x - box_w, pad_y, box_w, box_h);
     case CORNER_BL:
-      return GRect(pad_x, bounds.size.h - pad_y - box_h, box_w, box_h);
+      return GRect(pad_x, bounds.size.h - pad_y - comp_font_height(), box_w, box_h);
     case CORNER_BR:
     default:
-      return GRect(bounds.size.w - pad_x - box_w, bounds.size.h - pad_y - box_h, box_w, box_h);
+      return GRect(bounds.size.w - pad_x - box_w, bounds.size.h - pad_y - comp_font_height(), box_w, box_h);
   }
 }
 
@@ -613,6 +622,7 @@ static void prv_default_settings() {
     strcpy(settings.comp_color[i], "000000");
   }
   strcpy(settings.tempunit, "c");
+  strcpy(settings.compfontsize, "m");
 }
 
 // Save settings to persistent storage
@@ -650,6 +660,7 @@ static void prv_load_settings() {
       settings.hourlyvibration[sizeof(settings.hourlyvibration) - 1] = '\0';
       settings.roundbackgroundcolor[sizeof(settings.roundbackgroundcolor) - 1] = '\0';
       settings.tempunit[sizeof(settings.tempunit) - 1] = '\0';
+      settings.compfontsize[sizeof(settings.compfontsize) - 1] = '\0';
       for (int i = 0; i < CORNER_COUNT; i++) {
         settings.comp_type[i][sizeof(settings.comp_type[i]) - 1] = '\0';
         settings.comp_color[i][sizeof(settings.comp_color[i]) - 1] = '\0';
@@ -691,6 +702,20 @@ static void bg_color_update_proc(Layer *layer, GContext *ctx) {
     } else if (strcmp(settings.dialcolor, "round_black") == 0) {
       graphics_context_set_fill_color(ctx, GColorBlack);
       graphics_fill_rect(ctx, layer_get_bounds(layer), 0, GCornerNone);
+    }
+  #endif
+}
+
+static void update_comp_font() {
+  #if !defined(PBL_ROUND)
+    if (strcmp(settings.compfontsize, "xs") == 0) {
+      s_comp_font = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
+    } else if (strcmp(settings.compfontsize, "s") == 0) {
+      s_comp_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+    } else if (strcmp(settings.compfontsize, "l") == 0) {
+      s_comp_font = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
+    } else {
+      s_comp_font = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
     }
   #endif
 }
@@ -769,6 +794,9 @@ static void prv_update_display() {
     }
   #endif
   
+  // Update complication font
+  update_comp_font();
+
   // Mark hands layer dirty to redraw with new colors
   layer_mark_dirty(s_hands_layer);
   if (s_complications_layer) {
@@ -882,6 +910,12 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
   Tuple *temp_unit_t = dict_find(iterator, MESSAGE_KEY_TempUnit);
   if (temp_unit_t) {
     copy_cstring_setting(settings.tempunit, sizeof(settings.tempunit), temp_unit_t);
+    settings_changed = true;
+  }
+
+  Tuple *comp_font_size_t = dict_find(iterator, MESSAGE_KEY_CompFontSize);
+  if (comp_font_size_t) {
+    copy_cstring_setting(settings.compfontsize, sizeof(settings.compfontsize), comp_font_size_t);
     settings_changed = true;
   }
 
@@ -1355,9 +1389,7 @@ static void window_load(Window *window) {
   strftime(date, sizeof(date), "%d", t);
 
   s_res_gothic_18_bold = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
-  #if !defined(PBL_ROUND)
-  s_comp_font = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
-  #endif
+  update_comp_font();
 
   // Position date layer - adjust for round watchface mode
   if (strcmp(settings.dialcolor, "round") == 0 || strcmp(settings.dialcolor, "round_black") == 0) {

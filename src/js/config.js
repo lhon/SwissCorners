@@ -80,6 +80,18 @@ module.exports = [
       },
       {
         "type": "select",
+        "messageKey": "CompFontSize",
+        "defaultValue": "m",
+        "label": "Complication Font Size",
+        "options": [
+          { "label": "XS (14px)", "value": "xs" },
+          { "label": "S (18px)", "value": "s" },
+          { "label": "M (24px)", "value": "m" },
+          { "label": "L (28px)", "value": "l" }
+        ]
+      },
+      {
+        "type": "select",
         "messageKey": "CompTL",
         "defaultValue": "temp",
         "label": "Top Left",
