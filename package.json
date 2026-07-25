@@ -1,6 +1,6 @@
 {
   "name": "SwissCorners",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "SwissCorners Watchface - SBB style with corner complications",
   "main": "src/js/app.js",
   "keywords": [
