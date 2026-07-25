@@ -134,6 +134,48 @@
           "name": "IMAGE_SBB_FACE_ROUND",
           "type": "png",
           "targetPlatforms": ["gabbro"]
+        },
+        {
+          "file": "images/sbb-face-black-aplite.png",
+          "name": "IMAGE_SBB_FACE_ROUND_BLACK",
+          "type": "png",
+          "targetPlatforms": ["aplite"]
+        },
+        {
+          "file": "images/sbb-face-black-color.png",
+          "name": "IMAGE_SBB_FACE_ROUND_BLACK",
+          "type": "png",
+          "targetPlatforms": ["basalt"]
+        },
+        {
+          "file": "images/sbb-face-black-chalk.png",
+          "name": "IMAGE_SBB_FACE_ROUND_BLACK",
+          "type": "png",
+          "targetPlatforms": ["chalk"]
+        },
+        {
+          "file": "images/sbb-face-black-diorite.png",
+          "name": "IMAGE_SBB_FACE_ROUND_BLACK",
+          "type": "png",
+          "targetPlatforms": ["diorite"]
+        },
+        {
+          "file": "images/sbb-face-black-emery.png",
+          "name": "IMAGE_SBB_FACE_ROUND_BLACK",
+          "type": "png",
+          "targetPlatforms": ["emery"]
+        },
+        {
+          "file": "images/sbb-face-black-flint.png",
+          "name": "IMAGE_SBB_FACE_ROUND_BLACK",
+          "type": "png",
+          "targetPlatforms": ["flint"]
+        },
+        {
+          "file": "images/sbb-face-black-gabbro.png",
+          "name": "IMAGE_SBB_FACE_ROUND_BLACK",
+          "type": "png",
+          "targetPlatforms": ["gabbro"]
         }
       ]
     }

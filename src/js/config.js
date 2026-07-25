@@ -49,6 +49,10 @@ module.exports = [
             "value": "black_nl"
           },
           {
+            "label": "Black Round (No Logo)",
+            "value": "round_black"
+          },
+          {
             "label": "Round (No Logo)",
             "value": "round"
           }

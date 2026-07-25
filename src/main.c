@@ -688,6 +688,9 @@ static void bg_color_update_proc(Layer *layer, GContext *ctx) {
         }
       #endif
       graphics_fill_rect(ctx, layer_get_bounds(layer), 0, GCornerNone);
+    } else if (strcmp(settings.dialcolor, "round_black") == 0) {
+      graphics_context_set_fill_color(ctx, GColorBlack);
+      graphics_fill_rect(ctx, layer_get_bounds(layer), 0, GCornerNone);
     }
   #endif
 }
@@ -707,6 +710,8 @@ static void prv_update_display() {
     s_background_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MONDAINE_BLACKNLBG);
   } else if (strcmp(settings.dialcolor, "round") == 0) {
     s_background_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_SBB_FACE_ROUND);
+  } else if (strcmp(settings.dialcolor, "round_black") == 0) {
+    s_background_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_SBB_FACE_ROUND_BLACK);
   } else {
     // Default to white
     s_background_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MONDAINE_WHITEBG);
@@ -727,8 +732,10 @@ static void prv_update_display() {
         uint8_t brightness = (r + g + b) / 3;
         window_set_background_color(s_window, brightness > 127 ? GColorWhite : GColorBlack);
       #endif
+    } else if (strcmp(settings.dialcolor, "round_black") == 0) {
+      window_set_background_color(s_window, GColorBlack);
     } else {
-      APP_LOG(APP_LOG_LEVEL_INFO, "prv_update_display: setting window bg to black");
+      APP_LOG(APP_LOG_LEVEL_INFO, "prv_update_display: not round face, setting black bg");
       window_set_background_color(s_window, GColorBlack);
     }
   #endif
@@ -930,7 +937,7 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
   struct tm *t = localtime(&now);
 
   // Check if in round mode for hand and date positioning
-  bool is_round_mode = (strcmp(settings.dialcolor, "round") == 0);
+  bool is_round_mode = (strcmp(settings.dialcolor, "round") == 0 || strcmp(settings.dialcolor, "round_black") == 0);
   
   // Date
   if (strcmp(settings.dateoption, "nodate") != 0) {
@@ -945,7 +952,7 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
       graphics_context_set_fill_color(ctx, GColorDarkGray);
       graphics_context_set_stroke_color(ctx, GColorDarkGray);
     }
-    else if (strcmp(settings.dialcolor, "black") == 0 || strcmp(settings.dialcolor, "black_nl") == 0) {
+    else if (strcmp(settings.dialcolor, "black") == 0 || strcmp(settings.dialcolor, "black_nl") == 0 || strcmp(settings.dialcolor, "round_black") == 0) {
       graphics_context_set_fill_color(ctx, GColorWhite);
       graphics_context_set_stroke_color(ctx, GColorWhite);
     }
@@ -958,7 +965,7 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
       graphics_context_set_fill_color(ctx, GColorBlack);
       graphics_context_set_stroke_color(ctx, GColorBlack);
     }
-    else if (strcmp(settings.dialcolor, "black") == 0 || strcmp(settings.dialcolor, "black_nl") == 0) {
+    else if (strcmp(settings.dialcolor, "black") == 0 || strcmp(settings.dialcolor, "black_nl") == 0 || strcmp(settings.dialcolor, "round_black") == 0) {
       graphics_context_set_fill_color(ctx, GColorWhite);
       graphics_context_set_stroke_color(ctx, GColorWhite);
     }
@@ -982,7 +989,7 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
     graphics_context_set_fill_color(ctx, GColorBlack);
     graphics_context_set_stroke_color(ctx, GColorBlack);
   }
-  else if (strcmp(settings.dialcolor, "black") == 0 || strcmp(settings.dialcolor, "black_nl") == 0) {
+  else if (strcmp(settings.dialcolor, "black") == 0 || strcmp(settings.dialcolor, "black_nl") == 0 || strcmp(settings.dialcolor, "round_black") == 0) {
     graphics_context_set_fill_color(ctx, GColorWhite);
     graphics_context_set_stroke_color(ctx, GColorWhite);
   }
@@ -1017,7 +1024,7 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
     graphics_context_set_fill_color(ctx, GColorBlack);
     graphics_context_set_stroke_color(ctx, GColorBlack);
   }
-  else if (strcmp(settings.dialcolor, "black") == 0 || strcmp(settings.dialcolor, "black_nl") == 0) {
+  else if (strcmp(settings.dialcolor, "black") == 0 || strcmp(settings.dialcolor, "black_nl") == 0 || strcmp(settings.dialcolor, "round_black") == 0) {
     graphics_context_set_fill_color(ctx, GColorWhite);
     graphics_context_set_stroke_color(ctx, GColorWhite);
   }
@@ -1036,7 +1043,7 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
         graphics_context_set_fill_color(ctx, GColorBlack);
         graphics_context_set_stroke_color(ctx, GColorBlack);
       }
-      else if (strcmp(settings.dialcolor, "black") == 0 || strcmp(settings.dialcolor, "black_nl") == 0) {
+      else if (strcmp(settings.dialcolor, "black") == 0 || strcmp(settings.dialcolor, "black_nl") == 0 || strcmp(settings.dialcolor, "round_black") == 0) {
         graphics_context_set_fill_color(ctx, GColorWhite);
         graphics_context_set_stroke_color(ctx, GColorWhite);
       }
@@ -1073,7 +1080,7 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
       second_hand_opp_length = 20;
     #else
       // Standard displays (144x168)
-      bool is_round_mode = (strcmp(settings.dialcolor, "round") == 0);
+  bool is_round_mode = (strcmp(settings.dialcolor, "round") == 0 || strcmp(settings.dialcolor, "round_black") == 0);
       second_hand_length = is_round_mode ? 42 : (bounds.size.w / 2) - 20;
       second_hand_opp_length = is_round_mode ? 16 : 23;
     #endif
@@ -1138,7 +1145,7 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
         graphics_context_set_fill_color(ctx, GColorBlack);
         graphics_context_set_stroke_color(ctx, GColorBlack);
       }
-      else if (strcmp(settings.dialcolor, "black") == 0 || strcmp(settings.dialcolor, "black_nl") == 0) {
+      else if (strcmp(settings.dialcolor, "black") == 0 || strcmp(settings.dialcolor, "black_nl") == 0 || strcmp(settings.dialcolor, "round_black") == 0) {
         graphics_context_set_fill_color(ctx, GColorWhite);
         graphics_context_set_stroke_color(ctx, GColorWhite);
       }
@@ -1300,6 +1307,9 @@ static void window_load(Window *window) {
         uint8_t brightness = (r + g + b) / 3;
         window_set_background_color(s_window, brightness > 127 ? GColorWhite : GColorBlack);
       #endif
+    } else if (strcmp(settings.dialcolor, "round_black") == 0) {
+      APP_LOG(APP_LOG_LEVEL_INFO, "window_load: round_black face, setting black bg");
+      window_set_background_color(s_window, GColorBlack);
     } else {
       APP_LOG(APP_LOG_LEVEL_INFO, "window_load: not round face, setting black bg");
       window_set_background_color(s_window, GColorBlack);
@@ -1327,6 +1337,8 @@ static void window_load(Window *window) {
     s_background_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MONDAINE_BLACKNLBG);
   } else if (strcmp(settings.dialcolor, "round") == 0) {
     s_background_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_SBB_FACE_ROUND);
+  } else if (strcmp(settings.dialcolor, "round_black") == 0) {
+    s_background_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_SBB_FACE_ROUND_BLACK);
   } else {
     s_background_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_MONDAINE_WHITEBG);
   }
@@ -1348,7 +1360,7 @@ static void window_load(Window *window) {
   #endif
 
   // Position date layer - adjust for round watchface mode
-  if (strcmp(settings.dialcolor, "round") == 0) {
+  if (strcmp(settings.dialcolor, "round") == 0 || strcmp(settings.dialcolor, "round_black") == 0) {
     s_textlayer_date = text_layer_create(GRect(bounds.size.w / 2 + 25, bounds.size.h / 2 - 10, 22, 20));
   } else {
     s_textlayer_date = text_layer_create(GRect(102, 72, 22, 20));
