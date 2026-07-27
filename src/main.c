@@ -674,10 +674,10 @@ static GRect complication_rect(Corner corner, GRect bounds) {
 static GColor battery_level_color(GColor fallback) {
   #ifdef PBL_COLOR
     if (s_battery_percent > 50) {
-      return GColorGreen;
+      return GColorDarkGreen;
     }
     if (s_battery_percent > 20) {
-      return GColorChromeYellow;
+      return GColorWindsorTan;
     }
     return GColorRed;
   #else
@@ -685,30 +685,58 @@ static GColor battery_level_color(GColor fallback) {
   #endif
 }
 
-static void draw_battery_glyph(GContext *ctx, GPoint origin, GColor color, uint8_t percent) {
-  // Battery outline with terminal on the right and fill bar for charge level
-  const int16_t body_w = 14;
-  const int16_t body_h = 8;
-  const int16_t inner_max_w = 10;
+// Tall thin battery; total_h should match digit ink height (not font cell)
+static void draw_battery_glyph(GContext *ctx, GPoint origin, GColor color,
+                               uint8_t percent, int16_t total_h) {
+  if (total_h < 8) {
+    total_h = 8;
+  }
+  const int16_t nub_h = (total_h >= 18) ? 2 : 1;
+  const int16_t nub_w = 2;
+  const int16_t body_w = (total_h >= 18) ? 6 : 5;
+  const int16_t body_h = total_h - nub_h;
+  const int16_t inner_max_h = body_h - 4;  // 1px inset from top/bottom stroke
 
   graphics_context_set_stroke_color(ctx, color);
   graphics_context_set_fill_color(ctx, color);
   #ifdef PBL_COLOR
     graphics_context_set_stroke_width(ctx, 1);
   #endif
-  graphics_draw_rect(ctx, GRect(origin.x, origin.y, body_w, body_h));
-  graphics_fill_rect(ctx, GRect(origin.x + body_w, origin.y + 2, 2, body_h - 4), 0, GCornerNone);
+  graphics_fill_rect(ctx,
+    GRect(origin.x + (body_w - nub_w) / 2, origin.y, nub_w, nub_h), 0, GCornerNone);
+  graphics_draw_rect(ctx, GRect(origin.x, origin.y + nub_h, body_w, body_h));
 
-  int16_t fill_w = (int16_t)((percent * inner_max_w + 50) / 100);
-  if (percent > 0 && fill_w < 1) {
-    fill_w = 1;
+  if (inner_max_h <= 0) {
+    return;
   }
-  if (fill_w > inner_max_w) {
-    fill_w = inner_max_w;
+  int16_t fill_h = (int16_t)((percent * inner_max_h + 50) / 100);
+  if (percent > 0 && fill_h < 1) {
+    fill_h = 1;
   }
-  if (fill_w > 0) {
-    graphics_fill_rect(ctx, GRect(origin.x + 2, origin.y + 2, fill_w, body_h - 4), 0, GCornerNone);
+  if (fill_h > inner_max_h) {
+    fill_h = inner_max_h;
   }
+  if (fill_h > 0) {
+    graphics_fill_rect(ctx,
+      GRect(origin.x + 1, origin.y + nub_h + body_h - 1 - fill_h, body_w - 2, fill_h),
+      0, GCornerNone);
+  }
+}
+
+// Approximate digit ink height (Gothic cells include lots of empty ascent/descent)
+static int16_t comp_font_ink_height(void) {
+  if (strcmp(settings.compfontsize, "xs") == 0) return 9;   // 14
+  if (strcmp(settings.compfontsize, "s") == 0) return 12;   // 18
+  if (strcmp(settings.compfontsize, "l") == 0) return 20;   // 28
+  return 16;  // m / 24
+}
+
+// Empty pixels above digit ink when text is top-aligned in the font cell
+static int16_t comp_font_ink_ascent(void) {
+  if (strcmp(settings.compfontsize, "xs") == 0) return 5;
+  if (strcmp(settings.compfontsize, "s") == 0) return 6;
+  if (strcmp(settings.compfontsize, "l") == 0) return 8;
+  return 7;  // m
 }
 
 static void complications_update_proc(Layer *layer, GContext *ctx) {
@@ -768,20 +796,21 @@ static void complications_update_proc(Layer *layer, GContext *ctx) {
     const bool batt_icon = strcmp(settings.comp_type[corner], "battg") == 0;
     if (batt_pct || batt_icon) {
       GColor batt_color = battery_level_color(color);
-      const int16_t glyph_w = 16;
-      const int16_t glyph_h = 8;
       const int16_t gap = 2;
+      const int16_t ink_h = comp_font_ink_height();
+      const int16_t glyph_w = (ink_h >= 18) ? 6 : 5;
+      // Align to digit ink, not the vertical center of the font cell
+      const int16_t gy = rect.origin.y + comp_font_ink_ascent();
 
       if (batt_icon) {
         int16_t gx = (align == GTextAlignmentLeft)
           ? rect.origin.x
           : rect.origin.x + rect.size.w - glyph_w;
-        int16_t gy = rect.origin.y + rect.size.h / 2 - glyph_h / 2;
-        draw_battery_glyph(ctx, GPoint(gx, gy), batt_color, s_battery_percent);
+        draw_battery_glyph(ctx, GPoint(gx, gy), batt_color, s_battery_percent, ink_h);
         continue;
       }
 
-      // Battery %: "100" alone when full; otherwise digits + glyph to the right
+      // Battery %: digits + vertical glyph sized/aligned to digit ink
       snprintf(buf, sizeof(buf), "%d", (int)s_battery_percent);
       graphics_context_set_text_color(ctx, batt_color);
 
@@ -789,8 +818,7 @@ static void complications_update_proc(Layer *layer, GContext *ctx) {
         buf, s_comp_font, GRect(0, 0, rect.size.w, rect.size.h),
         GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
 
-      const bool show_glyph = s_battery_percent < 100;
-      const int16_t total_w = text_size.w + (show_glyph ? gap + glyph_w : 0);
+      const int16_t total_w = text_size.w + gap + glyph_w;
       const int16_t text_x = (align == GTextAlignmentLeft)
         ? rect.origin.x
         : rect.origin.x + rect.size.w - total_w;
@@ -798,11 +826,8 @@ static void complications_update_proc(Layer *layer, GContext *ctx) {
       graphics_draw_text(ctx, buf, s_comp_font,
         GRect(text_x, rect.origin.y, text_size.w + 4, rect.size.h),
         GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
-
-      if (show_glyph) {
-        int16_t gy = rect.origin.y + rect.size.h / 2 - glyph_h / 2;
-        draw_battery_glyph(ctx, GPoint(text_x + text_size.w + gap, gy), batt_color, s_battery_percent);
-      }
+      draw_battery_glyph(ctx, GPoint(text_x + text_size.w + gap, gy),
+        batt_color, s_battery_percent, ink_h);
       continue;
     }
 
