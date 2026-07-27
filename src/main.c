@@ -534,8 +534,8 @@ static bool complication_text(Corner corner, char *buf, size_t n) {
   if (strcmp(type, "off") == 0) {
     return false;
   }
-  if (strcmp(type, "weather") == 0) {
-    return false;  // drawn as icon
+  if (strcmp(type, "weather") == 0 || strcmp(type, "battg") == 0) {
+    return false;  // drawn specially
   }
 
   time_t now = time(NULL);
@@ -565,7 +565,7 @@ static bool complication_text(Corner corner, char *buf, size_t n) {
       snprintf(buf, n, "%d", hr);
     }
   } else if (strcmp(type, "batt") == 0) {
-    snprintf(buf, n, "%d%%", (int)s_battery_percent);
+    snprintf(buf, n, "%d", (int)s_battery_percent);
   } else if (strcmp(type, "sunrise") == 0) {
     if (!weather_is_fresh()) {
       snprintf(buf, n, "--");
@@ -615,6 +615,46 @@ static GRect complication_rect(Corner corner, GRect bounds) {
   }
 }
 
+static GColor battery_level_color(GColor fallback) {
+  #ifdef PBL_COLOR
+    if (s_battery_percent > 50) {
+      return GColorGreen;
+    }
+    if (s_battery_percent > 20) {
+      return GColorChromeYellow;
+    }
+    return GColorRed;
+  #else
+    return fallback;
+  #endif
+}
+
+static void draw_battery_glyph(GContext *ctx, GPoint origin, GColor color, uint8_t percent) {
+  // Battery outline with terminal on the right and fill bar for charge level
+  const int16_t body_w = 14;
+  const int16_t body_h = 8;
+  const int16_t inner_max_w = 10;
+
+  graphics_context_set_stroke_color(ctx, color);
+  graphics_context_set_fill_color(ctx, color);
+  #ifdef PBL_COLOR
+    graphics_context_set_stroke_width(ctx, 1);
+  #endif
+  graphics_draw_rect(ctx, GRect(origin.x, origin.y, body_w, body_h));
+  graphics_fill_rect(ctx, GRect(origin.x + body_w, origin.y + 2, 2, body_h - 4), 0, GCornerNone);
+
+  int16_t fill_w = (int16_t)((percent * inner_max_w + 50) / 100);
+  if (percent > 0 && fill_w < 1) {
+    fill_w = 1;
+  }
+  if (fill_w > inner_max_w) {
+    fill_w = inner_max_w;
+  }
+  if (fill_w > 0) {
+    graphics_fill_rect(ctx, GRect(origin.x + 2, origin.y + 2, fill_w, body_h - 4), 0, GCornerNone);
+  }
+}
+
 static void complications_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
   static char buf[12];
@@ -635,6 +675,48 @@ static void complications_update_proc(Layer *layer, GContext *ctx) {
       int16_t cy = rect.origin.y + rect.size.h / 2;
       int code = weather_is_fresh() ? s_weather_code : -1;
       draw_weather_icon(ctx, GPoint(cx, cy), code, color);
+      continue;
+    }
+
+    const bool batt_pct = strcmp(settings.comp_type[corner], "batt") == 0;
+    const bool batt_icon = strcmp(settings.comp_type[corner], "battg") == 0;
+    if (batt_pct || batt_icon) {
+      GColor batt_color = battery_level_color(color);
+      const int16_t glyph_w = 16;
+      const int16_t glyph_h = 8;
+      const int16_t gap = 2;
+
+      if (batt_icon) {
+        int16_t gx = (align == GTextAlignmentLeft)
+          ? rect.origin.x
+          : rect.origin.x + rect.size.w - glyph_w;
+        int16_t gy = rect.origin.y + rect.size.h / 2 - glyph_h / 2;
+        draw_battery_glyph(ctx, GPoint(gx, gy), batt_color, s_battery_percent);
+        continue;
+      }
+
+      // Battery %: "100" alone when full; otherwise digits + glyph to the right
+      snprintf(buf, sizeof(buf), "%d", (int)s_battery_percent);
+      graphics_context_set_text_color(ctx, batt_color);
+
+      GSize text_size = graphics_text_layout_get_content_size(
+        buf, s_comp_font, GRect(0, 0, rect.size.w, rect.size.h),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+
+      const bool show_glyph = s_battery_percent < 100;
+      const int16_t total_w = text_size.w + (show_glyph ? gap + glyph_w : 0);
+      const int16_t text_x = (align == GTextAlignmentLeft)
+        ? rect.origin.x
+        : rect.origin.x + rect.size.w - total_w;
+
+      graphics_draw_text(ctx, buf, s_comp_font,
+        GRect(text_x, rect.origin.y, text_size.w + 4, rect.size.h),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+
+      if (show_glyph) {
+        int16_t gy = rect.origin.y + rect.size.h / 2 - glyph_h / 2;
+        draw_battery_glyph(ctx, GPoint(text_x + text_size.w + gap, gy), batt_color, s_battery_percent);
+      }
       continue;
     }
 

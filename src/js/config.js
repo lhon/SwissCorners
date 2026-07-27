@@ -5,7 +5,8 @@ var complicationOptions = [
   { "label": "Day (Mon, Tue…)", "value": "day" },
   { "label": "Date (1–31)", "value": "date" },
   { "label": "Heart Rate", "value": "hr" },
-  { "label": "Battery", "value": "batt" },
+  { "label": "Battery %", "value": "batt" },
+  { "label": "Battery Icon", "value": "battg" },
   { "label": "Sunrise", "value": "sunrise" },
   { "label": "Sunset", "value": "sunset" },
   { "label": "Weather Icon", "value": "weather" }
