@@ -534,7 +534,7 @@ static bool complication_text(Corner corner, char *buf, size_t n) {
   if (strcmp(type, "off") == 0) {
     return false;
   }
-  if (strcmp(type, "weather") == 0 || strcmp(type, "battg") == 0) {
+  if (strcmp(type, "weather") == 0 || strcmp(type, "battg") == 0 || strcmp(type, "daydate") == 0) {
     return false;  // drawn specially
   }
 
@@ -591,27 +591,83 @@ static int16_t comp_font_height() {
   return 28;
 }
 
-static GRect complication_rect(Corner corner, GRect bounds) {
+// One notch smaller than the configured complication font
+static GFont comp_font_secondary() {
+  if (strcmp(settings.compfontsize, "l") == 0) {
+    return fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
+  }
+  if (strcmp(settings.compfontsize, "m") == 0) {
+    return fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  }
+  if (strcmp(settings.compfontsize, "s") == 0) {
+    return fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
+  }
+  return fonts_get_system_font(FONT_KEY_GOTHIC_09);
+}
+
+static int16_t comp_font_secondary_height() {
+  if (strcmp(settings.compfontsize, "l") == 0) return 28;
+  if (strcmp(settings.compfontsize, "m") == 0) return 21;
+  if (strcmp(settings.compfontsize, "s") == 0) return 17;
+  return 11;
+}
+
+// Vertical advance when stacking lines (tighter than full font cell height)
+static int16_t comp_font_stack_step(bool primary) {
+  if (primary) {
+    if (strcmp(settings.compfontsize, "xs") == 0) return 11;
+    if (strcmp(settings.compfontsize, "s") == 0) return 14;
+    if (strcmp(settings.compfontsize, "l") == 0) return 22;
+    return 18;  // m
+  }
+  if (strcmp(settings.compfontsize, "l") == 0) return 18;  // 24
+  if (strcmp(settings.compfontsize, "m") == 0) return 14;  // 18
+  if (strcmp(settings.compfontsize, "s") == 0) return 11;  // 14
+  return 8;  // 09
+}
+
+// Intrinsic size of the complication content (not a fixed slot).
+static GSize complication_content_size(Corner corner) {
   const int16_t box_w = 56;
-  const int16_t box_h = 28;
+  const char *type = settings.comp_type[corner];
+
+  if (strcmp(type, "daydate") == 0) {
+    const bool top_corner = (corner == CORNER_TL || corner == CORNER_TR);
+    // Stack extent = step of the upper line + draw height of the lower line
+    if (top_corner) {
+      return GSize(box_w, comp_font_stack_step(true) + comp_font_secondary_height());
+    }
+    return GSize(box_w, comp_font_stack_step(false) + comp_font_height());
+  }
+
+  // Single-line text, weather icon, and battery share the primary font cell
+  return GSize(box_w, comp_font_height());
+}
+
+// Anchor content so pad_x / pad_y are the blank strips to the edges at each corner.
+static GRect complication_rect(Corner corner, GRect bounds) {
+  const GSize size = complication_content_size(corner);
   #if PBL_DISPLAY_WIDTH >= 200
+    // Emery / Time 2: tops sit closer to the bezel than bottoms
     const int16_t pad_x = 6;
-    const int16_t pad_y = 4;
+    const int16_t pad_y_top = 2;
+    const int16_t pad_y_bottom = 4;
   #else
     const int16_t pad_x = 2;
-    const int16_t pad_y = 0;
+    const int16_t pad_y_top = 0;
+    const int16_t pad_y_bottom = 0;
   #endif
 
   switch (corner) {
     case CORNER_TL:
-      return GRect(pad_x, pad_y, box_w, box_h);
+      return GRect(pad_x, pad_y_top, size.w, size.h);
     case CORNER_TR:
-      return GRect(bounds.size.w - pad_x - box_w, pad_y, box_w, box_h);
+      return GRect(bounds.size.w - pad_x - size.w, pad_y_top, size.w, size.h);
     case CORNER_BL:
-      return GRect(pad_x, bounds.size.h - pad_y - comp_font_height(), box_w, box_h);
+      return GRect(pad_x, bounds.size.h - pad_y_bottom - size.h, size.w, size.h);
     case CORNER_BR:
     default:
-      return GRect(bounds.size.w - pad_x - box_w, bounds.size.h - pad_y - comp_font_height(), box_w, box_h);
+      return GRect(bounds.size.w - pad_x - size.w, bounds.size.h - pad_y_bottom - size.h, size.w, size.h);
   }
 }
 
@@ -675,6 +731,36 @@ static void complications_update_proc(Layer *layer, GContext *ctx) {
       int16_t cy = rect.origin.y + rect.size.h / 2;
       int code = weather_is_fresh() ? s_weather_code : -1;
       draw_weather_icon(ctx, GPoint(cx, cy), code, color);
+      continue;
+    }
+
+    // Day + date: weekday above date. Line nearer the corner uses the main font.
+    if (strcmp(settings.comp_type[corner], "daydate") == 0) {
+      static const char *day_short[] = {"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"};
+      time_t now = time(NULL);
+      struct tm *t = localtime(&now);
+      const char *day = day_short[t->tm_wday % 7];
+      char date_buf[4];
+      snprintf(date_buf, sizeof(date_buf), "%d", t->tm_mday);
+
+      const bool top_corner = (corner == CORNER_TL || corner == CORNER_TR);
+      GFont primary = s_comp_font;
+      GFont secondary = comp_font_secondary();
+
+      // Top: day is outer (large). Bottom: date is outer (large).
+      GFont day_font = top_corner ? primary : secondary;
+      GFont date_font = top_corner ? secondary : primary;
+      const int16_t day_step = top_corner ? comp_font_stack_step(true) : comp_font_stack_step(false);
+      const int16_t day_draw_h = top_corner ? comp_font_height() : comp_font_secondary_height();
+      const int16_t date_draw_h = top_corner ? comp_font_secondary_height() : comp_font_height();
+
+      // Tight stack: advance by visual step, not full font cell
+      GRect day_rect = GRect(rect.origin.x, rect.origin.y, rect.size.w, day_draw_h);
+      GRect date_rect = GRect(rect.origin.x, rect.origin.y + day_step, rect.size.w, date_draw_h);
+
+      graphics_context_set_text_color(ctx, color);
+      graphics_draw_text(ctx, day, day_font, day_rect, GTextOverflowModeTrailingEllipsis, align, NULL);
+      graphics_draw_text(ctx, date_buf, date_font, date_rect, GTextOverflowModeTrailingEllipsis, align, NULL);
       continue;
     }
 

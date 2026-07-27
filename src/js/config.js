@@ -4,6 +4,7 @@ var complicationOptions = [
   { "label": "Steps", "value": "steps" },
   { "label": "Day (Mon, Tue…)", "value": "day" },
   { "label": "Date (1–31)", "value": "date" },
+  { "label": "Day + Date", "value": "daydate" },
   { "label": "Heart Rate", "value": "hr" },
   { "label": "Battery %", "value": "batt" },
   { "label": "Battery Icon", "value": "battg" },
