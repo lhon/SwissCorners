@@ -175,6 +175,9 @@ static int s_sunset_mins = -1;
 static int s_cached_steps = -1;
 static int s_cached_hr = -1;
 
+// Battery percent (0-100), updated via battery_state_service
+static uint8_t s_battery_percent = 0;
+
 // Backlight seconds mode: show second hand only while light is on
 static bool s_show_seconds = false;
 #if !defined(_PBL_API_EXISTS_backlight_service_subscribe)
@@ -403,11 +406,6 @@ static void backlight_approx_tap_handler(AccelAxisType axis, int32_t direction) 
   (void)direction;
   backlight_approx_wake();
 }
-
-static void backlight_approx_battery_handler(BatteryChargeState charge) {
-  (void)charge;
-  backlight_approx_wake();
-}
 #endif
 
 static void subscribe_backlight_seconds(void) {
@@ -420,7 +418,6 @@ static void subscribe_backlight_seconds(void) {
   #endif
 #else
   accel_tap_service_subscribe(backlight_approx_tap_handler);
-  battery_state_service_subscribe(backlight_approx_battery_handler);
   s_show_seconds = false;
 #endif
 }
@@ -430,7 +427,6 @@ static void unsubscribe_backlight_seconds(void) {
   backlight_service_unsubscribe();
 #else
   accel_tap_service_unsubscribe();
-  battery_state_service_unsubscribe();
   if (s_backlight_approx_timer) {
     app_timer_cancel(s_backlight_approx_timer);
     s_backlight_approx_timer = NULL;
@@ -450,6 +446,21 @@ static void apply_second_hand_mode(void) {
   if (s_hands_layer) {
     layer_mark_dirty(s_hands_layer);
   }
+}
+
+static void battery_handler(BatteryChargeState charge) {
+  s_battery_percent = charge.charge_percent;
+  #if !defined(PBL_ROUND)
+  if (s_complications_layer) {
+    layer_mark_dirty(s_complications_layer);
+  }
+  #endif
+  #if !defined(_PBL_API_EXISTS_backlight_service_subscribe)
+  // Charger plug/unplug also wakes the backlight approx (same as system backlight)
+  if (is_backlight_seconds_mode()) {
+    backlight_approx_wake();
+  }
+  #endif
 }
 
 #if !defined(PBL_ROUND)
@@ -537,6 +548,8 @@ static bool complication_text(Corner corner, char *buf, size_t n) {
     } else {
       snprintf(buf, n, "%d", hr);
     }
+  } else if (strcmp(type, "batt") == 0) {
+    snprintf(buf, n, "%d%%", (int)s_battery_percent);
   } else if (strcmp(type, "sunrise") == 0) {
     format_clock_mins(buf, n, s_sunrise_mins);
   } else if (strcmp(type, "sunset") == 0) {
@@ -1530,6 +1543,10 @@ static void init() {
   // Subscribe to tick timer (and backlight seconds if configured)
   apply_second_hand_mode();
 
+  // Battery level (complications + backlight-approx charger wake)
+  s_battery_percent = battery_state_service_peek().charge_percent;
+  battery_state_service_subscribe(battery_handler);
+
   #if defined(PBL_HEALTH)
   health_service_events_subscribe(health_handler, NULL);
   // Prime the health cache
@@ -1565,6 +1582,7 @@ static void deinit() {
   prv_save_settings();
 
   unsubscribe_backlight_seconds();
+  battery_state_service_unsubscribe();
 
   #if defined(PBL_HEALTH)
   health_service_events_unsubscribe();

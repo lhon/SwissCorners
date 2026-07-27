@@ -28,7 +28,7 @@ Four corner complications (rectangular watches only — not shown on Pebble Time
 | Bottom left | Steps (`1.2k`) |
 | Bottom right | Date (1–31) |
 
-Also available: heart rate, sunrise, sunset, weather icon, or off. Temperature unit (°C / °F) is configurable.
+Also available: heart rate, battery, sunrise, sunset, weather icon, or off. Temperature unit (°C / °F) is configurable.
 
 Weather, sunrise, and sunset come from Open-Meteo via the phone (location permission). Steps and heart rate use Pebble Health where available.
 
