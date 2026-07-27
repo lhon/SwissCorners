@@ -30,7 +30,7 @@ Four corner complications (rectangular watches only — not shown on Pebble Time
 
 Also available: heart rate, battery, sunrise, sunset, weather icon, or off. Temperature unit (°C / °F) is configurable.
 
-Weather, sunrise, and sunset come from Open-Meteo via the phone (location permission). Steps and heart rate use Pebble Health where available.
+Weather, sunrise, and sunset come from Open-Meteo via the phone (location permission). Last successful reading is kept on the watch for up to 3 hours if the phone is offline. Steps and heart rate use Pebble Health where available.
 
 ## Building
 

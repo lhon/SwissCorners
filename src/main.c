@@ -115,8 +115,10 @@ const GPathInfo HOUR_HAND_POINTS_GABBRO = {
   }
 };
 
-// Persistent storage key (bumped for complications settings)
+// Persistent storage keys
 #define SETTINGS_KEY 2
+#define WEATHER_KEY 3
+#define WEATHER_MAX_AGE_SEC (3 * 3600)
 
 // Message keys from package.json
 #define MESSAGE_KEY_DialColor 0
@@ -164,12 +166,26 @@ typedef struct ClaySettings {
 
 static ClaySettings settings;
 
-// Weather data from phone (Celsius; converted on display)
+// Weather data from phone (Celsius; converted on display). Persisted across relaunches.
 static int s_temperature_c = 0;
 static bool s_temperature_valid = false;
 static int s_weather_code = -1;
 static int s_sunrise_mins = -1;
 static int s_sunset_mins = -1;
+static time_t s_weather_fetched_at = 0;
+
+typedef struct {
+  int temperature_c;
+  int weather_code;
+  int sunrise_mins;
+  int sunset_mins;
+  time_t fetched_at;
+  bool valid;
+} WeatherCache;
+
+static bool weather_is_fresh(void);
+static void prv_save_weather(void);
+static void prv_load_weather(void);
 
 // Cached health data (updated via health_handler, not polled every frame)
 static int s_cached_steps = -1;
@@ -526,7 +542,7 @@ static bool complication_text(Corner corner, char *buf, size_t n) {
   struct tm *t = localtime(&now);
 
   if (strcmp(type, "temp") == 0) {
-    if (!s_temperature_valid) {
+    if (!weather_is_fresh()) {
       snprintf(buf, n, "--");
     } else {
       int temp = s_temperature_c;
@@ -551,9 +567,17 @@ static bool complication_text(Corner corner, char *buf, size_t n) {
   } else if (strcmp(type, "batt") == 0) {
     snprintf(buf, n, "%d%%", (int)s_battery_percent);
   } else if (strcmp(type, "sunrise") == 0) {
-    format_clock_mins(buf, n, s_sunrise_mins);
+    if (!weather_is_fresh()) {
+      snprintf(buf, n, "--");
+    } else {
+      format_clock_mins(buf, n, s_sunrise_mins);
+    }
   } else if (strcmp(type, "sunset") == 0) {
-    format_clock_mins(buf, n, s_sunset_mins);
+    if (!weather_is_fresh()) {
+      snprintf(buf, n, "--");
+    } else {
+      format_clock_mins(buf, n, s_sunset_mins);
+    }
   } else {
     return false;
   }
@@ -609,7 +633,8 @@ static void complications_update_proc(Layer *layer, GContext *ctx) {
     if (strcmp(settings.comp_type[corner], "weather") == 0) {
       int16_t cx = (align == GTextAlignmentLeft) ? rect.origin.x + 8 : rect.origin.x + rect.size.w - 8;
       int16_t cy = rect.origin.y + rect.size.h / 2;
-      draw_weather_icon(ctx, GPoint(cx, cy), s_weather_code, color);
+      int code = weather_is_fresh() ? s_weather_code : -1;
+      draw_weather_icon(ctx, GPoint(cx, cy), code, color);
       continue;
     }
 
@@ -645,6 +670,46 @@ static void prv_default_settings() {
 // Save settings to persistent storage
 static void prv_save_settings() {
   persist_write_data(SETTINGS_KEY, &settings, sizeof(settings));
+}
+
+static bool weather_is_fresh(void) {
+  if (!s_temperature_valid || s_weather_fetched_at == 0) {
+    return false;
+  }
+  time_t now = time(NULL);
+  if (now < s_weather_fetched_at) {
+    return false;
+  }
+  return (now - s_weather_fetched_at) < WEATHER_MAX_AGE_SEC;
+}
+
+static void prv_save_weather(void) {
+  WeatherCache cache = {
+    .temperature_c = s_temperature_c,
+    .weather_code = s_weather_code,
+    .sunrise_mins = s_sunrise_mins,
+    .sunset_mins = s_sunset_mins,
+    .fetched_at = s_weather_fetched_at,
+    .valid = s_temperature_valid,
+  };
+  persist_write_data(WEATHER_KEY, &cache, sizeof(cache));
+}
+
+static void prv_load_weather(void) {
+  if (!persist_exists(WEATHER_KEY)) {
+    return;
+  }
+  WeatherCache cache;
+  int bytes_read = persist_read_data(WEATHER_KEY, &cache, sizeof(cache));
+  if (bytes_read < (int)sizeof(cache) || !cache.valid) {
+    return;
+  }
+  s_temperature_c = cache.temperature_c;
+  s_weather_code = cache.weather_code;
+  s_sunrise_mins = cache.sunrise_mins;
+  s_sunset_mins = cache.sunset_mins;
+  s_weather_fetched_at = cache.fetched_at;
+  s_temperature_valid = true;
 }
 
 // Helper to check if string contains only valid hex chars
@@ -941,6 +1006,7 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
   if (temp_t) {
     s_temperature_c = (int)temp_t->value->int32;
     s_temperature_valid = true;
+    s_weather_fetched_at = time(NULL);
     weather_changed = true;
   }
   Tuple *weather_code_t = dict_find(iterator, MESSAGE_KEY_WeatherCode);
@@ -963,8 +1029,13 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
     prv_save_settings();
     prv_update_display();
     request_weather();
-  } else if (weather_changed && s_complications_layer) {
-    layer_mark_dirty(s_complications_layer);
+  } else if (weather_changed) {
+    if (temp_t) {
+      prv_save_weather();
+    }
+    if (s_complications_layer) {
+      layer_mark_dirty(s_complications_layer);
+    }
   }
 }
 
@@ -1495,6 +1566,7 @@ static void window_unload(Window *window) {
 static void init() {
   // Load settings first
   prv_load_settings();
+  prv_load_weather();
 
   // Set up AppMessage with larger buffers for Clay + weather
   const int inbox_size = 1024;
