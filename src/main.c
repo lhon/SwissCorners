@@ -871,7 +871,7 @@ static bool weather_is_fresh(void) {
   }
   time_t now = time(NULL);
   if (now < s_weather_fetched_at) {
-    return false;
+    return true;
   }
   return (now - s_weather_fetched_at) < WEATHER_MAX_AGE_SEC;
 }
