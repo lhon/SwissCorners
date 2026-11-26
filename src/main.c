@@ -142,6 +142,7 @@ const GPathInfo HOUR_HAND_POINTS_GABBRO = {
 #define MESSAGE_KEY_Sunset 18
 #define MESSAGE_KEY_RequestWeather 19
 #define MESSAGE_KEY_CompFontSize 20
+#define MESSAGE_KEY_JSReady 21
 
 typedef enum {
   CORNER_TL = 0,
@@ -336,7 +337,31 @@ static int get_heart_rate(void) {
 }
 #endif // !PBL_ROUND
 
+static bool has_complication_type(const char *type) {
+  #if !defined(PBL_ROUND)
+    for (int i = 0; i < CORNER_COUNT; i++) {
+      if (strcmp(settings.comp_type[i], type) == 0) {
+        return true;
+      }
+    }
+  #else
+    (void)type;
+  #endif
+  return false;
+}
+
+static bool needs_weather_data(void) {
+  return has_complication_type("temp")
+      || has_complication_type("weather")
+      || has_complication_type("sunrise")
+      || has_complication_type("sunset");
+}
+
 static void request_weather(void) {
+  if (!needs_weather_data()) {
+    return;
+  }
+
   DictionaryIterator *iter;
   if (app_message_outbox_begin(&iter) != APP_MSG_OK) {
     return;
@@ -844,7 +869,7 @@ static void complications_update_proc(Layer *layer, GContext *ctx) {
 // Default settings
 static void prv_default_settings() {
   strcpy(settings.dialcolor, "round");
-  strcpy(settings.secondhandoption, "quartz");
+  strcpy(settings.secondhandoption, "backlight");
   strcpy(settings.dateoption, "nodate");
   strcpy(settings.hourlyvibration, "off");
   settings.bluetoothstatusdetection = 0;
@@ -1091,6 +1116,28 @@ static void copy_color_setting(char *dest, size_t dest_size, Tuple *t) {
   snprintf(dest, dest_size, "%06lX", (unsigned long)value);
 }
 
+#if defined(PBL_HEALTH) && !defined(PBL_ROUND)
+static void health_handler(HealthEventType event, void *context);
+static bool s_health_subscribed = false;
+
+static void update_health_subscription(void) {
+  const bool needs_health = has_complication_type("steps")
+      || has_complication_type("hr");
+
+  if (needs_health && !s_health_subscribed) {
+    s_cached_steps = get_steps_today();
+    s_cached_hr = get_heart_rate();
+    health_service_events_subscribe(health_handler, NULL);
+    s_health_subscribed = true;
+  } else if (!needs_health && s_health_subscribed) {
+    health_service_events_unsubscribe();
+    s_health_subscribed = false;
+    s_cached_steps = -1;
+    s_cached_hr = -1;
+  }
+}
+#endif
+
 // Handle incoming AppMessage
 static void inbox_received_callback(DictionaryIterator *iterator, void *context) {
   APP_LOG(APP_LOG_LEVEL_INFO, "inbox_received: START");
@@ -1217,10 +1264,16 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
     s_sunset_mins = (int)sunset_t->value->int32;
     weather_changed = true;
   }
+  Tuple *js_ready_t = dict_find(iterator, MESSAGE_KEY_JSReady);
 
   if (settings_changed) {
     prv_save_settings();
     prv_update_display();
+#if defined(PBL_HEALTH) && !defined(PBL_ROUND)
+    update_health_subscription();
+#endif
+    request_weather();
+  } else if (js_ready_t && needs_weather_data()) {
     request_weather();
   } else if (weather_changed) {
     if (temp_t) {
@@ -1550,28 +1603,25 @@ static void hide_bluetooth_disconnected_splash_window() {
   window_stack_remove(bluetooth_disconnected_splash_window, true);
 }
 
-#if defined(PBL_HEALTH)
+#if defined(PBL_HEALTH) && !defined(PBL_ROUND)
 static void health_handler(HealthEventType event, void *context) {
   (void)event;
   (void)context;
-  #if !defined(PBL_ROUND)
-    if (event == HealthEventMovementUpdate || event == HealthEventSignificantUpdate) {
+  if (event == HealthEventMovementUpdate || event == HealthEventSignificantUpdate) {
+    if (has_complication_type("steps")) {
       s_cached_steps = get_steps_today();
     }
-    if (event == HealthEventHeartRateUpdate || event == HealthEventSignificantUpdate) {
+  }
+  if (event == HealthEventHeartRateUpdate || event == HealthEventSignificantUpdate) {
+    if (has_complication_type("hr")) {
       s_cached_hr = get_heart_rate();
     }
-    if (s_complications_layer) {
-      layer_mark_dirty(s_complications_layer);
-    }
-  #endif
+  }
+  if (s_complications_layer) {
+    layer_mark_dirty(s_complications_layer);
+  }
 }
 #endif
-
-static void request_weather_timer(void *data) {
-  (void)data;
-  request_weather();
-}
 
 static void handle_bluetooth_connected() {
   window_stack_remove(bluetooth_disconnected_splash_window, true);
@@ -1812,14 +1862,9 @@ static void init() {
   s_battery_percent = battery_state_service_peek().charge_percent;
   battery_state_service_subscribe(battery_handler);
 
-  #if defined(PBL_HEALTH)
-  health_service_events_subscribe(health_handler, NULL);
-  // Prime the health cache
-  #if !defined(PBL_ROUND)
-    s_cached_steps = get_steps_today();
-    s_cached_hr = get_heart_rate();
-  #endif
-  #endif
+#if defined(PBL_HEALTH) && !defined(PBL_ROUND)
+  update_health_subscription();
+#endif
 
   // Bluetooth status detection
   bluetooth_connected_splash_window = window_create();
@@ -1839,8 +1884,6 @@ static void init() {
 
   bluetooth_connection_service_subscribe(bluetooth_connection_callback);
 
-  // Ask phone for weather once AppMessage is open
-  app_timer_register(500, request_weather_timer, NULL);
 }
 
 static void deinit() {
@@ -1849,9 +1892,11 @@ static void deinit() {
   unsubscribe_backlight_seconds();
   battery_state_service_unsubscribe();
 
-  #if defined(PBL_HEALTH)
-  health_service_events_unsubscribe();
-  #endif
+#if defined(PBL_HEALTH) && !defined(PBL_ROUND)
+  if (s_health_subscribed) {
+    health_service_events_unsubscribe();
+  }
+#endif
 
   bluetooth_connection_service_unsubscribe();
   tick_timer_service_unsubscribe();

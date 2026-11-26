@@ -1,6 +1,6 @@
 {
   "name": "SwissCorners",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "SwissCorners Watchface - SBB style with corner complications",
   "main": "src/js/app.js",
   "keywords": [
@@ -16,10 +16,30 @@
     "displayName": "SwissCorners",
     "uuid": "afd7e676-d148-48bb-a258-b6815d3c30a6",
     "sdkVersion": "3",
+    "manifestVersion": 2,
     "enableMultiJS": true,
     "capabilities": [
-      "location",
-      "health"
+      "configurable"
+    ],
+    "usesPermissions": [
+      {
+        "name": "Internet",
+        "parameters": {
+          "domains": ["api.open-meteo.com"]
+        },
+        "reason": "To get weather and daylight times",
+        "required": false
+      },
+      {
+        "name": "Location",
+        "reason": "To show weather for your current location",
+        "required": false
+      },
+      {
+        "name": "Health",
+        "reason": "To show your steps and heart rate",
+        "required": false
+      }
     ],
     "targetPlatforms": [
       "aplite",
@@ -54,7 +74,8 @@
       "Sunrise": 17,
       "Sunset": 18,
       "RequestWeather": 19,
-      "CompFontSize": 20
+      "CompFontSize": 20,
+      "JSReady": 21
     },
     "resources": {
       "media": [

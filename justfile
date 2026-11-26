@@ -10,11 +10,11 @@ install:
 
 # Build the application for all platforms
 build:
-    pebble build
+    pebble build --sdk 4.44
 
 # Build for a specific platform
 build-platform platform:
-    pebble build --platform {{platform}}
+    pebble build --sdk 4.44 --platform {{platform}}
 
 # Clean build artifacts
 clean:

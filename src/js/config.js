@@ -167,7 +167,7 @@ module.exports = [
       {
         "type": "select",
         "messageKey": "SecondHandOption",
-        "defaultValue": "quartz",
+        "defaultValue": "backlight",
         "label": "Second Hand Style",
         "options": [
           {

@@ -70,15 +70,11 @@ function getWeather() {
 
 Pebble.addEventListener('ready', function () {
   console.log('PebbleKit JS ready');
-  getWeather();
+  Pebble.sendAppMessage({ 'JSReady': 1 });
 });
 
 Pebble.addEventListener('appmessage', function (e) {
   if (e.payload && e.payload.RequestWeather !== undefined) {
     getWeather();
   }
-});
-
-Pebble.addEventListener('webviewclosed', function () {
-  getWeather();
 });
